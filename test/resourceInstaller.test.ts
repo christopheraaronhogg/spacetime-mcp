@@ -6,6 +6,8 @@ import test from "node:test";
 
 import { installOrUpdateResources } from "../src/cli/resourceInstaller.js";
 
+const TEST_VERSION = "0.6.0";
+
 async function withTempWorkspace(run: (workspaceRoot: string) => Promise<void>): Promise<void> {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "spacetime-mcp-install-test-"));
 
@@ -21,7 +23,7 @@ test("installOrUpdateResources install mode creates managed resources", async ()
     const result = await installOrUpdateResources({
       workspaceRoot,
       mode: "install",
-      version: "0.5.0"
+      version: TEST_VERSION
     });
 
     assert.equal(result.created.length, 7);
@@ -57,7 +59,7 @@ test("installOrUpdateResources update mode refreshes managed resources", async (
     await installOrUpdateResources({
       workspaceRoot,
       mode: "install",
-      version: "0.5.0"
+      version: TEST_VERSION
     });
 
     const guidelinePath = path.join(workspaceRoot, ".ai/guidelines/spacetimedb/core.md");
@@ -67,7 +69,7 @@ test("installOrUpdateResources update mode refreshes managed resources", async (
     const result = await installOrUpdateResources({
       workspaceRoot,
       mode: "update",
-      version: "0.5.0"
+      version: TEST_VERSION
     });
 
     assert.equal(result.updated.includes(".ai/guidelines/spacetimedb/core.md"), true);
@@ -101,7 +103,7 @@ test("installOrUpdateResources merges into unmanaged JSON server configs", async
     const result = await installOrUpdateResources({
       workspaceRoot,
       mode: "update",
-      version: "0.5.0"
+      version: TEST_VERSION
     });
 
     const after = await readFile(targetPath, "utf8");
@@ -121,7 +123,7 @@ test("installOrUpdateResources respects target selection", async () => {
     const result = await installOrUpdateResources({
       workspaceRoot,
       mode: "install",
-      version: "0.5.0",
+      version: TEST_VERSION,
       targets: ["codex"]
     });
 
@@ -138,7 +140,7 @@ test("installOrUpdateResources dry-run reports changes without writing files", a
     const result = await installOrUpdateResources({
       workspaceRoot,
       mode: "install",
-      version: "0.5.0",
+      version: TEST_VERSION,
       dryRun: true
     });
 
@@ -146,5 +148,71 @@ test("installOrUpdateResources dry-run reports changes without writing files", a
 
     await assert.rejects(readFile(path.join(workspaceRoot, "spacetime-mcp.json"), "utf8"));
     await assert.rejects(readFile(path.join(workspaceRoot, ".mcp.json"), "utf8"));
+  });
+});
+
+test("installOrUpdateResources is idempotent across repeated install runs", async () => {
+  await withTempWorkspace(async (workspaceRoot) => {
+    await installOrUpdateResources({
+      workspaceRoot,
+      mode: "install",
+      version: TEST_VERSION
+    });
+
+    const result = await installOrUpdateResources({
+      workspaceRoot,
+      mode: "install",
+      version: TEST_VERSION
+    });
+
+    const codexConfig = await readFile(path.join(workspaceRoot, ".codex/config.toml"), "utf8");
+    const sectionCount = codexConfig.match(/\[mcp_servers\.spacetime-mcp\]/g)?.length ?? 0;
+
+    assert.equal(result.created.length, 0);
+    assert.equal(result.updated.length, 0);
+    assert.equal(result.skipped.length, 0);
+    assert.equal(result.unchanged.length, 7);
+    assert.equal(sectionCount, 1);
+  });
+});
+
+test("installOrUpdateResources skips malformed JSON config files safely", async () => {
+  await withTempWorkspace(async (workspaceRoot) => {
+    const malformedPath = path.join(workspaceRoot, ".mcp.json");
+    await writeFile(malformedPath, "{", "utf8");
+
+    const result = await installOrUpdateResources({
+      workspaceRoot,
+      mode: "update",
+      version: TEST_VERSION,
+      targets: ["mcp"]
+    });
+
+    const after = await readFile(malformedPath, "utf8");
+    const skippedEntry = result.skipped.find((entry) => entry.path === ".mcp.json");
+
+    assert.equal(after, "{");
+    assert.equal(skippedEntry?.reason, "existing file is not valid JSON");
+  });
+});
+
+test("installOrUpdateResources skips JSON configs with invalid server collection shape", async () => {
+  await withTempWorkspace(async (workspaceRoot) => {
+    const opencodePath = path.join(workspaceRoot, "opencode.json");
+    await writeFile(opencodePath, JSON.stringify({ mcp: [] }, null, 2), "utf8");
+
+    const before = await readFile(opencodePath, "utf8");
+    const result = await installOrUpdateResources({
+      workspaceRoot,
+      mode: "update",
+      version: TEST_VERSION,
+      targets: ["opencode"]
+    });
+
+    const after = await readFile(opencodePath, "utf8");
+    const skippedEntry = result.skipped.find((entry) => entry.path === "opencode.json");
+
+    assert.equal(after, before);
+    assert.equal(skippedEntry?.reason, 'key "mcp" is not an object');
   });
 });
