@@ -2,19 +2,50 @@ import path from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 import { getSpacetimeDocsMarkdown } from "../context/spacetimeDocs.js";
+import {
+  mergeJsonServerConfig,
+  upsertTomlSection,
+  type JsonServerMergeOptions,
+  type TomlSectionMergeOptions
+} from "./configMerge.js";
 
 export type ResourceInstallMode = "install" | "update";
 
+export const INSTALL_TARGETS = ["all", "mcp", "opencode", "codex", "antigravity"] as const;
+export type InstallTarget = (typeof INSTALL_TARGETS)[number];
+
+const CONFIG_TARGETS = ["mcp", "opencode", "codex", "antigravity"] as const;
+type ConfigTarget = (typeof CONFIG_TARGETS)[number];
+
+const SERVER_NAME = "spacetime-mcp";
+const MANAGED_MARKER = "spacetime-mcp-managed: true";
+
 interface ManagedResource {
+  kind: "managed_markdown" | "managed_json";
   relativePath: string;
   content: string;
-  kind: "markdown" | "json";
 }
+
+interface JsonMergeResource {
+  kind: "merge_json";
+  relativePath: string;
+  options: Omit<JsonServerMergeOptions, "existingContent">;
+}
+
+interface TomlMergeResource {
+  kind: "merge_toml";
+  relativePath: string;
+  options: Omit<TomlSectionMergeOptions, "existingContent">;
+}
+
+type ResourceDefinition = ManagedResource | JsonMergeResource | TomlMergeResource;
 
 export interface InstallResourcesOptions {
   workspaceRoot: string;
   mode: ResourceInstallMode;
   version: string;
+  targets?: InstallTarget[];
+  dryRun?: boolean;
 }
 
 export interface ResourceSkip {
@@ -25,12 +56,31 @@ export interface ResourceSkip {
 export interface InstallResourcesResult {
   mode: ResourceInstallMode;
   workspaceRoot: string;
+  targets: ConfigTarget[];
+  dryRun: boolean;
   created: string[];
   updated: string[];
+  unchanged: string[];
   skipped: ResourceSkip[];
 }
 
-const MANAGED_MARKER = "spacetime-mcp-managed: true";
+export function isInstallTarget(value: string): value is InstallTarget {
+  return INSTALL_TARGETS.includes(value as InstallTarget);
+}
+
+function normalizeTargets(targets?: InstallTarget[]): ConfigTarget[] {
+  const requested = targets && targets.length > 0 ? targets : ["all"];
+
+  if (requested.includes("all")) {
+    return [...CONFIG_TARGETS];
+  }
+
+  const normalized = [...new Set(requested)]
+    .filter((target): target is ConfigTarget => target !== "all")
+    .filter((target): target is ConfigTarget => CONFIG_TARGETS.includes(target as ConfigTarget));
+
+  return normalized.length > 0 ? normalized : [...CONFIG_TARGETS];
+}
 
 function withManagedMarkdown(body: string): string {
   return [
@@ -72,29 +122,59 @@ function getGuidelineMarkdown(): string {
   return withManagedMarkdown(getSpacetimeDocsMarkdown());
 }
 
-function getMcpConfigJson(): string {
-  return `${JSON.stringify(
-    {
-      "x-spacetime-mcp-managed": true,
-      mcpServers: {
-        "spacetime-mcp": {
-          command: "npx",
-          args: ["spacetime-mcp"]
-        }
-      }
-    },
-    null,
-    2
-  )}\n`;
+function getServerCommandArgs(): string[] {
+  return ["-y", "spacetime-mcp", "mcp"];
 }
 
-function getSpacetimeConfigJson(version: string): string {
+function getGenericMcpServerConfig(): Record<string, unknown> {
+  return {
+    command: "npx",
+    args: getServerCommandArgs()
+  };
+}
+
+function getOpenCodeServerConfig(): Record<string, unknown> {
+  return {
+    type: "local",
+    enabled: true,
+    command: ["npx", ...getServerCommandArgs()]
+  };
+}
+
+function getCodexSectionValues(workspaceRoot: string): Record<string, string | string[]> {
+  return {
+    command: "npx",
+    args: getServerCommandArgs(),
+    cwd: workspaceRoot
+  };
+}
+
+function getSpacetimeConfigJson(version: string, targets: ConfigTarget[]): string {
+  const targetPaths: Record<string, string> = {};
+
+  if (targets.includes("mcp")) {
+    targetPaths.mcp = ".mcp.json";
+  }
+
+  if (targets.includes("opencode")) {
+    targetPaths.opencode = "opencode.json";
+  }
+
+  if (targets.includes("codex")) {
+    targetPaths.codex = ".codex/config.toml";
+  }
+
+  if (targets.includes("antigravity")) {
+    targetPaths.antigravity = "mcp_config.json";
+  }
+
   return `${JSON.stringify(
     {
       "x-spacetime-mcp-managed": true,
       version,
+      targets,
       resources: {
-        mcpConfig: ".mcp.json",
+        ...targetPaths,
         guidelines: ".ai/guidelines/spacetimedb/core.md",
         skill: ".ai/skills/spacetimedb-development/SKILL.md"
       },
@@ -109,29 +189,84 @@ function getSpacetimeConfigJson(version: string): string {
   )}\n`;
 }
 
-function buildResources(version: string): ManagedResource[] {
-  return [
+function buildResources(
+  workspaceRoot: string,
+  version: string,
+  targets: ConfigTarget[]
+): ResourceDefinition[] {
+  const resources: ResourceDefinition[] = [
     {
-      relativePath: ".mcp.json",
-      content: getMcpConfigJson(),
-      kind: "json"
-    },
-    {
+      kind: "managed_json",
       relativePath: "spacetime-mcp.json",
-      content: getSpacetimeConfigJson(version),
-      kind: "json"
+      content: getSpacetimeConfigJson(version, targets)
     },
     {
+      kind: "managed_markdown",
       relativePath: ".ai/guidelines/spacetimedb/core.md",
-      content: getGuidelineMarkdown(),
-      kind: "markdown"
+      content: getGuidelineMarkdown()
     },
     {
+      kind: "managed_markdown",
       relativePath: ".ai/skills/spacetimedb-development/SKILL.md",
-      content: getSkillMarkdown(),
-      kind: "markdown"
+      content: getSkillMarkdown()
     }
   ];
+
+  if (targets.includes("mcp")) {
+    resources.push({
+      kind: "merge_json",
+      relativePath: ".mcp.json",
+      options: {
+        serverCollectionKey: "mcpServers",
+        serverName: SERVER_NAME,
+        serverConfig: getGenericMcpServerConfig(),
+        defaultConfig: {
+          "x-spacetime-mcp-managed": true
+        }
+      }
+    });
+  }
+
+  if (targets.includes("opencode")) {
+    resources.push({
+      kind: "merge_json",
+      relativePath: "opencode.json",
+      options: {
+        serverCollectionKey: "mcp",
+        serverName: SERVER_NAME,
+        serverConfig: getOpenCodeServerConfig(),
+        defaultConfig: {
+          $schema: "https://opencode.ai/config.json"
+        }
+      }
+    });
+  }
+
+  if (targets.includes("antigravity")) {
+    resources.push({
+      kind: "merge_json",
+      relativePath: "mcp_config.json",
+      options: {
+        serverCollectionKey: "mcpServers",
+        serverName: SERVER_NAME,
+        serverConfig: getGenericMcpServerConfig(),
+        defaultConfig: {}
+      }
+    });
+  }
+
+  if (targets.includes("codex")) {
+    resources.push({
+      kind: "merge_toml",
+      relativePath: ".codex/config.toml",
+      options: {
+        sectionName: `mcp_servers.${SERVER_NAME}`,
+        values: getCodexSectionValues(workspaceRoot)
+      }
+    });
+  }
+
+  return resources;
 }
 
 async function readIfExists(targetPath: string): Promise<string | undefined> {
@@ -143,7 +278,7 @@ async function readIfExists(targetPath: string): Promise<string | undefined> {
 }
 
 function isManagedContent(kind: ManagedResource["kind"], existing: string): boolean {
-  if (kind === "markdown") {
+  if (kind === "managed_markdown") {
     return existing.includes(MANAGED_MARKER);
   }
 
@@ -160,58 +295,159 @@ async function writeResourceFile(targetPath: string, content: string): Promise<v
   await writeFile(targetPath, content, "utf8");
 }
 
+function markCreated(result: InstallResourcesResult, resourcePath: string): void {
+  result.created.push(resourcePath);
+}
+
+function markUpdated(result: InstallResourcesResult, resourcePath: string): void {
+  result.updated.push(resourcePath);
+}
+
+function markUnchanged(result: InstallResourcesResult, resourcePath: string): void {
+  result.unchanged.push(resourcePath);
+}
+
+function markSkipped(result: InstallResourcesResult, resourcePath: string, reason: string): void {
+  result.skipped.push({
+    path: resourcePath,
+    reason
+  });
+}
+
+async function applyManagedResource(
+  resource: ManagedResource,
+  absolutePath: string,
+  existing: string | undefined,
+  result: InstallResourcesResult
+): Promise<void> {
+  if (existing === undefined) {
+    if (!result.dryRun) {
+      await writeResourceFile(absolutePath, resource.content);
+    }
+
+    markCreated(result, resource.relativePath);
+    return;
+  }
+
+  if (!isManagedContent(resource.kind, existing)) {
+    markSkipped(result, resource.relativePath, "existing file is not managed by spacetime-mcp");
+    return;
+  }
+
+  if (existing === resource.content) {
+    markUnchanged(result, resource.relativePath);
+    return;
+  }
+
+  if (!result.dryRun) {
+    await writeResourceFile(absolutePath, resource.content);
+  }
+
+  markUpdated(result, resource.relativePath);
+}
+
+async function applyJsonMergeResource(
+  resource: JsonMergeResource,
+  absolutePath: string,
+  existing: string | undefined,
+  result: InstallResourcesResult
+): Promise<void> {
+  const mergeResult = mergeJsonServerConfig({
+    ...resource.options,
+    existingContent: existing
+  });
+
+  if (!mergeResult.content || mergeResult.error) {
+    markSkipped(result, resource.relativePath, mergeResult.error ?? "unable to merge JSON config");
+    return;
+  }
+
+  if (!mergeResult.changed) {
+    markUnchanged(result, resource.relativePath);
+    return;
+  }
+
+  if (!result.dryRun) {
+    await writeResourceFile(absolutePath, mergeResult.content);
+  }
+
+  if (mergeResult.created) {
+    markCreated(result, resource.relativePath);
+    return;
+  }
+
+  markUpdated(result, resource.relativePath);
+}
+
+async function applyTomlMergeResource(
+  resource: TomlMergeResource,
+  absolutePath: string,
+  existing: string | undefined,
+  result: InstallResourcesResult
+): Promise<void> {
+  const mergeResult = upsertTomlSection({
+    ...resource.options,
+    existingContent: existing
+  });
+
+  if (!mergeResult.content || mergeResult.error) {
+    markSkipped(result, resource.relativePath, mergeResult.error ?? "unable to merge TOML config");
+    return;
+  }
+
+  if (!mergeResult.changed) {
+    markUnchanged(result, resource.relativePath);
+    return;
+  }
+
+  if (!result.dryRun) {
+    await writeResourceFile(absolutePath, mergeResult.content);
+  }
+
+  if (mergeResult.created) {
+    markCreated(result, resource.relativePath);
+    return;
+  }
+
+  markUpdated(result, resource.relativePath);
+}
+
 export async function installOrUpdateResources(
   options: InstallResourcesOptions
 ): Promise<InstallResourcesResult> {
-  const resources = buildResources(options.version);
+  const targets = normalizeTargets(options.targets);
+
   const result: InstallResourcesResult = {
     mode: options.mode,
     workspaceRoot: options.workspaceRoot,
+    targets,
+    dryRun: options.dryRun ?? false,
     created: [],
     updated: [],
+    unchanged: [],
     skipped: []
   };
+
+  const resources = buildResources(options.workspaceRoot, options.version, targets);
 
   for (const resource of resources) {
     const absolutePath = path.join(options.workspaceRoot, resource.relativePath);
     const existing = await readIfExists(absolutePath);
 
-    if (existing === undefined) {
-      await writeResourceFile(absolutePath, resource.content);
-      result.created.push(resource.relativePath);
-      continue;
-    }
-
-    const managed = isManagedContent(resource.kind, existing);
-
-    if (options.mode === "install") {
-      if (!managed) {
-        result.skipped.push({
-          path: resource.relativePath,
-          reason: "existing file is not managed by spacetime-mcp"
-        });
-        continue;
+    switch (resource.kind) {
+      case "managed_markdown":
+      case "managed_json": {
+        await applyManagedResource(resource, absolutePath, existing, result);
+        break;
       }
-
-      if (existing !== resource.content) {
-        await writeResourceFile(absolutePath, resource.content);
-        result.updated.push(resource.relativePath);
+      case "merge_json": {
+        await applyJsonMergeResource(resource, absolutePath, existing, result);
+        break;
       }
-
-      continue;
-    }
-
-    if (!managed) {
-      result.skipped.push({
-        path: resource.relativePath,
-        reason: "existing file is not managed by spacetime-mcp"
-      });
-      continue;
-    }
-
-    if (existing !== resource.content) {
-      await writeResourceFile(absolutePath, resource.content);
-      result.updated.push(resource.relativePath);
+      case "merge_toml": {
+        await applyTomlMergeResource(resource, absolutePath, existing, result);
+        break;
+      }
     }
   }
 

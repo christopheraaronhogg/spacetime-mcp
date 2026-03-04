@@ -24,11 +24,15 @@ test("installOrUpdateResources install mode creates managed resources", async ()
       version: "0.5.0"
     });
 
-    assert.equal(result.created.length, 4);
+    assert.equal(result.created.length, 7);
     assert.equal(result.updated.length, 0);
     assert.equal(result.skipped.length, 0);
 
     const mcpConfig = await readFile(path.join(workspaceRoot, ".mcp.json"), "utf8");
+    const opencodeConfig = await readFile(path.join(workspaceRoot, "opencode.json"), "utf8");
+    const antigravityConfig = await readFile(path.join(workspaceRoot, "mcp_config.json"), "utf8");
+    const codexConfig = await readFile(path.join(workspaceRoot, ".codex/config.toml"), "utf8");
+    const summaryConfig = await readFile(path.join(workspaceRoot, "spacetime-mcp.json"), "utf8");
     const guideline = await readFile(
       path.join(workspaceRoot, ".ai/guidelines/spacetimedb/core.md"),
       "utf8"
@@ -39,6 +43,10 @@ test("installOrUpdateResources install mode creates managed resources", async ()
     );
 
     assert.equal(mcpConfig.includes("\"x-spacetime-mcp-managed\": true"), true);
+    assert.equal(opencodeConfig.includes("\"$schema\": \"https://opencode.ai/config.json\""), true);
+    assert.equal(antigravityConfig.includes("\"mcpServers\""), true);
+    assert.equal(codexConfig.includes("[mcp_servers.spacetime-mcp]"), true);
+    assert.equal(summaryConfig.includes("\"x-spacetime-mcp-managed\": true"), true);
     assert.equal(guideline.includes("spacetime-mcp-managed: true"), true);
     assert.equal(skill.includes("name: spacetimedb-development"), true);
   });
@@ -69,7 +77,7 @@ test("installOrUpdateResources update mode refreshes managed resources", async (
   });
 });
 
-test("installOrUpdateResources skips unmanaged files", async () => {
+test("installOrUpdateResources merges into unmanaged JSON server configs", async () => {
   await withTempWorkspace(async (workspaceRoot) => {
     const targetPath = path.join(workspaceRoot, ".mcp.json");
     await writeFile(
@@ -97,8 +105,46 @@ test("installOrUpdateResources skips unmanaged files", async () => {
     });
 
     const after = await readFile(targetPath, "utf8");
+    const parsed = JSON.parse(after) as {
+      mcpServers: Record<string, { command: string; args: string[] }>;
+    };
 
-    assert.equal(before, after);
-    assert.equal(result.skipped.some((entry) => entry.path === ".mcp.json"), true);
+    assert.notEqual(before, after);
+    assert.equal(parsed.mcpServers.custom.command, "node");
+    assert.equal(parsed.mcpServers["spacetime-mcp"].command, "npx");
+    assert.equal(result.skipped.some((entry) => entry.path === ".mcp.json"), false);
+  });
+});
+
+test("installOrUpdateResources respects target selection", async () => {
+  await withTempWorkspace(async (workspaceRoot) => {
+    const result = await installOrUpdateResources({
+      workspaceRoot,
+      mode: "install",
+      version: "0.5.0",
+      targets: ["codex"]
+    });
+
+    assert.deepEqual(result.targets, ["codex"]);
+    assert.equal(result.created.includes(".codex/config.toml"), true);
+    assert.equal(result.created.includes(".mcp.json"), false);
+    assert.equal(result.created.includes("opencode.json"), false);
+    assert.equal(result.created.includes("mcp_config.json"), false);
+  });
+});
+
+test("installOrUpdateResources dry-run reports changes without writing files", async () => {
+  await withTempWorkspace(async (workspaceRoot) => {
+    const result = await installOrUpdateResources({
+      workspaceRoot,
+      mode: "install",
+      version: "0.5.0",
+      dryRun: true
+    });
+
+    assert.equal(result.created.length, 7);
+
+    await assert.rejects(readFile(path.join(workspaceRoot, "spacetime-mcp.json"), "utf8"));
+    await assert.rejects(readFile(path.join(workspaceRoot, ".mcp.json"), "utf8"));
   });
 });

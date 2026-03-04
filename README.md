@@ -6,7 +6,7 @@ It is designed to stop common hallucinations (REST endpoints, SQL migrations, OR
 
 ## Current Status
 
-- Phase: `v0.5.0` install/update workflow foundation
+- Phase: `v0.6.0` cross-client MCP install/update compatibility
 - Language target for parsing: Rust-first MVP
 - Full product vision and scope live in `docs/PRD.md`
 
@@ -31,10 +31,23 @@ Install MCP resources into a workspace:
 npx spacetime-mcp install
 ```
 
+Install resources for selected clients only:
+
+```bash
+npx spacetime-mcp install --target codex
+npx spacetime-mcp install --target mcp,opencode
+```
+
 Update managed MCP resources:
 
 ```bash
 npx spacetime-mcp update
+```
+
+Preview changes without writing files:
+
+```bash
+npx spacetime-mcp update --dry-run
 ```
 
 Run against another workspace root:
@@ -90,13 +103,16 @@ Remote docs API can be configured globally via `SPACETIME_MCP_DOCS_API_URL`.
 
 Running `spacetime-mcp install` or `spacetime-mcp update` manages these workspace files:
 
-- `.mcp.json` - MCP server registration for local tools
+- `.mcp.json` - generic MCP registration under `mcpServers`
+- `opencode.json` - OpenCode MCP registration under `mcp`
+- `.codex/config.toml` - Codex MCP registration under `mcp_servers`
+- `mcp_config.json` - Antigravity MCP registration under `mcpServers`
 - `spacetime-mcp.json` - package-level managed config metadata
 - `.ai/guidelines/spacetimedb/core.md` - built-in SpacetimeDB grounding guidelines
 - `.ai/skills/spacetimedb-development/SKILL.md` - on-demand skill for feature work
 
 Managed files include a marker and are safe to refresh with `spacetime-mcp update`.
-Unmanaged files are preserved and reported as skipped.
+JSON and TOML config files are merged non-destructively so existing servers are preserved.
 
 ## Project Layout
 
