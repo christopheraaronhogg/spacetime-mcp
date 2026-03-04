@@ -1010,3 +1010,70 @@ export function createSpacetimeMcpServer(workspaceRoot: string): Server {
 
   return server;
 }
+
+interface LocalCallToolResponse {
+  isError?: boolean;
+  content?: Array<{ type: string; text?: string }>;
+}
+
+type LocalCallToolHandler = (
+  request: {
+    method: "tools/call";
+    params: {
+      name: string;
+      arguments?: Record<string, unknown>;
+    };
+  },
+  extra?: unknown
+) => Promise<LocalCallToolResponse>;
+
+function getLocalCallToolHandler(server: Server): LocalCallToolHandler {
+  const handlers = Reflect.get(server as object, "_requestHandlers") as
+    | Map<string, LocalCallToolHandler>
+    | undefined;
+
+  const handler = handlers?.get("tools/call");
+  if (!handler) {
+    throw new Error("tools/call handler is not available on server instance");
+  }
+
+  return handler;
+}
+
+export interface LocalToolRunResult {
+  isError: boolean;
+  text: string;
+  payload: unknown;
+}
+
+export async function runSpacetimeToolLocally(
+  workspaceRoot: string,
+  toolName: string,
+  toolArgs?: Record<string, unknown>
+): Promise<LocalToolRunResult> {
+  const server = createSpacetimeMcpServer(workspaceRoot);
+  const handler = getLocalCallToolHandler(server);
+
+  const response = await handler({
+    method: "tools/call",
+    params: {
+      name: toolName,
+      arguments: toolArgs ?? {}
+    }
+  });
+
+  const text = response.content?.[0]?.text ?? "";
+
+  let payload: unknown = text;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    payload = text;
+  }
+
+  return {
+    isError: Boolean(response.isError),
+    text,
+    payload
+  };
+}

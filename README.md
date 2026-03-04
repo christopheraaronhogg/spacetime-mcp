@@ -81,6 +81,31 @@ Run package smoke validation:
 npm run smoke:package
 ```
 
+## Query CLI (agent-first)
+
+Use `query` when the agent has terminal access and you want low-context, pointer-friendly retrieval without MCP transport wiring.
+
+```bash
+# Minimal schema view (default)
+spacetime-mcp query schema --workspace /path/to/project
+
+# Progressive disclosure
+spacetime-mcp query schema --workspace /path/to/project --summary
+spacetime-mcp query schema --workspace /path/to/project --full
+
+# Return artifact pointer instead of inline payload
+spacetime-mcp query schema --workspace /path/to/project --full --artifact
+
+# Follow-up read from artifact pointer
+spacetime-mcp query artifact <artifactId> --workspace /path/to/project
+
+# Search symbols, then resolve stable ref ids
+spacetime-mcp query symbols player --workspace /path/to/project
+spacetime-mcp query ref tbl_xxxxx --workspace /path/to/project --summary
+```
+
+`query` subjects map directly to MCP tools (`app`, `schema`, `reducers`, `symbols`, `ref`, `call`, `docs`, `docs-search`, `skills`, `skill`, `artifacts`, `artifact`).
+
 ## MCP Tool Contract (v1.1)
 
 All read-oriented tools support progressive disclosure and context-safe delivery controls:

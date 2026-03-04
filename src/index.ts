@@ -10,14 +10,15 @@ import {
   type InstallResourcesResult,
   type InstallTarget
 } from "./cli/resourceInstaller.js";
-import { createSpacetimeMcpServer } from "./mcpServer.js";
+import { createSpacetimeMcpServer, runSpacetimeToolLocally } from "./mcpServer.js";
 import { SPACETIME_MCP_VERSION } from "./version.js";
 
-type CliCommand = "install" | "update" | "mcp" | "help";
+type CliCommand = "install" | "update" | "mcp" | "query" | "help";
 type CliErrorCode =
   | "ERR_UNKNOWN_OPTION"
   | "ERR_MISSING_OPTION_VALUE"
   | "ERR_INVALID_TARGET"
+  | "ERR_INVALID_QUERY"
   | "ERR_UNEXPECTED_ARGUMENT"
   | "ERR_RUNTIME_FAILURE";
 
@@ -56,7 +57,7 @@ function parseCommand(raw?: string): CliCommand | undefined {
     return undefined;
   }
 
-  if (raw === "install" || raw === "update" || raw === "mcp") {
+  if (raw === "install" || raw === "update" || raw === "mcp" || raw === "query") {
     return raw;
   }
 
@@ -75,8 +76,14 @@ function printHelp(): void {
   console.log("  spacetime-mcp mcp [workspacePath]");
   console.log("  spacetime-mcp install [workspacePath] [--target <target>] [--dry-run] [--json]");
   console.log("  spacetime-mcp update [workspacePath] [--target <target>] [--dry-run] [--json]");
+  console.log("  spacetime-mcp query <subject> [--workspace <path>] [options]");
   console.log("");
   console.log("Targets: all, mcp, opencode, codex, antigravity");
+  console.log(
+    "Query subjects: app, schema, reducers, ref, symbols, call, docs, docs-search, skills, skill, artifacts, artifact"
+  );
+  console.log("Query defaults: resolution=minimal, responseMode=inline");
+  console.log("Example: spacetime-mcp query schema --contains player --summary --artifact");
   console.log("Exit codes: 0=success, 1=runtime error, 2=usage error");
 }
 
@@ -189,6 +196,501 @@ function parseMcpCommandArgs(argv: string[]): ParsedMcpArgs {
   };
 }
 
+const QUERY_SUBJECT_TO_TOOL: Record<string, string> = {
+  app: "get_spacetime_app_info",
+  schema: "get_spacetime_schema",
+  reducers: "get_spacetime_reducers",
+  ref: "read_spacetime_ref",
+  symbols: "search_spacetime_symbols",
+  call: "get_spacetime_client_call",
+  docs: "get_spacetime_docs",
+  "docs-search": "search_spacetime_docs",
+  skills: "list_spacetime_skills",
+  skill: "get_spacetime_skill",
+  artifacts: "list_spacetime_artifacts",
+  artifact: "read_spacetime_artifact"
+};
+
+const QUERY_RESOLUTIONS = new Set(["minimal", "summary", "full"]);
+const QUERY_RESPONSE_MODES = new Set(["inline", "artifact"]);
+const QUERY_SYMBOL_KINDS = new Set(["all", "table", "reducer"]);
+const QUERY_CLIENTS = new Set(["typescript", "csharp", "unity"]);
+const QUERY_DOC_SOURCES = new Set(["all", "builtin", "workspace", "remote"]);
+
+interface ParsedQueryArgs {
+  subject: string;
+  toolName: string;
+  workspaceRoot: string;
+  toolArgs: Record<string, unknown>;
+  outputJson: boolean;
+}
+
+function parseRequiredValue(argv: string[], index: number, option: string): [string, number] {
+  const value = argv[index + 1];
+  if (!value || value.startsWith("--")) {
+    throwCliError("ERR_MISSING_OPTION_VALUE", `${option} requires a value`);
+  }
+
+  return [value, index + 1];
+}
+
+function parseNumberValue(rawValue: string, option: string): number {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed)) {
+    throwCliError("ERR_INVALID_QUERY", `${option} requires a numeric value`);
+  }
+
+  return parsed;
+}
+
+function setResolution(toolArgs: Record<string, unknown>, value: string): void {
+  if (!QUERY_RESOLUTIONS.has(value)) {
+    throwCliError("ERR_INVALID_QUERY", `Invalid resolution: ${value}`);
+  }
+
+  toolArgs.resolution = value;
+}
+
+function setResponseMode(toolArgs: Record<string, unknown>, value: string): void {
+  if (!QUERY_RESPONSE_MODES.has(value)) {
+    throwCliError("ERR_INVALID_QUERY", `Invalid response mode: ${value}`);
+  }
+
+  toolArgs.responseMode = value;
+}
+
+function resolveQueryToolName(subject: string): string {
+  const normalized = subject.trim().toLowerCase();
+  if (normalized.length === 0) {
+    throwCliError("ERR_INVALID_QUERY", "query requires a subject");
+  }
+
+  if (QUERY_SUBJECT_TO_TOOL[normalized]) {
+    return QUERY_SUBJECT_TO_TOOL[normalized];
+  }
+
+  if (normalized.startsWith("get_spacetime_") || normalized.startsWith("read_spacetime_") || normalized.startsWith("search_spacetime_") || normalized.startsWith("list_spacetime_")) {
+    return normalized;
+  }
+
+  throwCliError("ERR_INVALID_QUERY", `Unknown query subject: ${subject}`);
+}
+
+function parseQueryCommandArgs(argv: string[]): ParsedQueryArgs {
+  const subject = argv[0];
+  if (!subject) {
+    throwCliError("ERR_INVALID_QUERY", "query requires a subject (example: schema, reducers, symbols)");
+  }
+
+  const toolName = resolveQueryToolName(subject);
+  let workspacePath: string | undefined;
+  let outputJson = false;
+  const toolArgs: Record<string, unknown> = {};
+  const positionals: string[] = [];
+
+  for (let index = 1; index < argv.length; index += 1) {
+    const token = argv[index];
+
+    if (token === "--json") {
+      outputJson = true;
+      continue;
+    }
+
+    if (token === "--refresh") {
+      toolArgs.refresh = true;
+      continue;
+    }
+
+    if (token === "--artifact") {
+      toolArgs.responseMode = "artifact";
+      continue;
+    }
+
+    if (token === "--summary") {
+      toolArgs.resolution = "summary";
+      continue;
+    }
+
+    if (token === "--full") {
+      toolArgs.resolution = "full";
+      continue;
+    }
+
+    if (token === "--minimal") {
+      toolArgs.resolution = "minimal";
+      continue;
+    }
+
+    if (token === "--include-remote-docs") {
+      toolArgs.includeRemoteDocs = true;
+      continue;
+    }
+
+    if (token === "--no-workspace-docs") {
+      toolArgs.includeWorkspaceDocs = false;
+      continue;
+    }
+
+    if (token === "--include-skills") {
+      toolArgs.includeSkills = true;
+      continue;
+    }
+
+    if (token === "--no-workspace-guidelines") {
+      toolArgs.includeWorkspaceGuidelines = false;
+      continue;
+    }
+
+    if (token.startsWith("--workspace=")) {
+      workspacePath = token.slice("--workspace=".length);
+      continue;
+    }
+
+    if (token.startsWith("--resolution=")) {
+      setResolution(toolArgs, token.slice("--resolution=".length));
+      continue;
+    }
+
+    if (token.startsWith("--response-mode=")) {
+      setResponseMode(toolArgs, token.slice("--response-mode=".length));
+      continue;
+    }
+
+    if (token.startsWith("--max-inline-chars=")) {
+      toolArgs.maxInlineChars = parseNumberValue(
+        token.slice("--max-inline-chars=".length),
+        "--max-inline-chars"
+      );
+      continue;
+    }
+
+    if (token.startsWith("--limit=")) {
+      toolArgs.limit = parseNumberValue(token.slice("--limit=".length), "--limit");
+      continue;
+    }
+
+    if (token.startsWith("--cursor=")) {
+      toolArgs.cursor = parseNumberValue(token.slice("--cursor=".length), "--cursor");
+      continue;
+    }
+
+    if (token.startsWith("--offset=")) {
+      toolArgs.offset = parseNumberValue(token.slice("--offset=".length), "--offset");
+      continue;
+    }
+
+    if (token.startsWith("--max-age-ms=")) {
+      toolArgs.maxAgeMs = parseNumberValue(token.slice("--max-age-ms=".length), "--max-age-ms");
+      continue;
+    }
+
+    if (token.startsWith("--remote-timeout-ms=")) {
+      toolArgs.remoteTimeoutMs = parseNumberValue(
+        token.slice("--remote-timeout-ms=".length),
+        "--remote-timeout-ms"
+      );
+      continue;
+    }
+
+    if (token.startsWith("--contains=")) {
+      toolArgs.contains = token.slice("--contains=".length);
+      continue;
+    }
+
+    if (token.startsWith("--table=")) {
+      toolArgs.tableName = token.slice("--table=".length);
+      continue;
+    }
+
+    if (token.startsWith("--reducer=")) {
+      toolArgs.reducerName = token.slice("--reducer=".length);
+      continue;
+    }
+
+    if (token.startsWith("--query=")) {
+      toolArgs.query = token.slice("--query=".length);
+      continue;
+    }
+
+    if (token.startsWith("--kind=")) {
+      const value = token.slice("--kind=".length);
+      if (!QUERY_SYMBOL_KINDS.has(value)) {
+        throwCliError("ERR_INVALID_QUERY", `Invalid symbol kind: ${value}`);
+      }
+      toolArgs.kind = value;
+      continue;
+    }
+
+    if (token.startsWith("--client=")) {
+      const value = token.slice("--client=".length);
+      if (!QUERY_CLIENTS.has(value)) {
+        throwCliError("ERR_INVALID_QUERY", `Invalid client target: ${value}`);
+      }
+      toolArgs.client = value;
+      continue;
+    }
+
+    if (token.startsWith("--source=")) {
+      const value = token.slice("--source=".length);
+      if (!QUERY_DOC_SOURCES.has(value)) {
+        throwCliError("ERR_INVALID_QUERY", `Invalid docs source: ${value}`);
+      }
+      toolArgs.source = value;
+      continue;
+    }
+
+    if (token.startsWith("--remote-endpoint=")) {
+      toolArgs.remoteEndpoint = token.slice("--remote-endpoint=".length);
+      continue;
+    }
+
+    if (token.startsWith("--ref=")) {
+      toolArgs.refId = token.slice("--ref=".length);
+      continue;
+    }
+
+    if (token.startsWith("--skill=")) {
+      toolArgs.skillName = token.slice("--skill=".length);
+      continue;
+    }
+
+    if (token.startsWith("--artifact-id=")) {
+      toolArgs.artifactId = token.slice("--artifact-id=".length);
+      continue;
+    }
+
+    if (token === "--workspace") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      workspacePath = value;
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--resolution") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      setResolution(toolArgs, value);
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--response-mode") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      setResponseMode(toolArgs, value);
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--max-inline-chars") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      toolArgs.maxInlineChars = parseNumberValue(value, token);
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--limit") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      toolArgs.limit = parseNumberValue(value, token);
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--cursor") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      toolArgs.cursor = parseNumberValue(value, token);
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--offset") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      toolArgs.offset = parseNumberValue(value, token);
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--max-age-ms") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      toolArgs.maxAgeMs = parseNumberValue(value, token);
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--contains") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      toolArgs.contains = value;
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--table") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      toolArgs.tableName = value;
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--reducer") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      toolArgs.reducerName = value;
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--query") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      toolArgs.query = value;
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--kind") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      if (!QUERY_SYMBOL_KINDS.has(value)) {
+        throwCliError("ERR_INVALID_QUERY", `Invalid symbol kind: ${value}`);
+      }
+      toolArgs.kind = value;
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--client") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      if (!QUERY_CLIENTS.has(value)) {
+        throwCliError("ERR_INVALID_QUERY", `Invalid client target: ${value}`);
+      }
+      toolArgs.client = value;
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--source") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      if (!QUERY_DOC_SOURCES.has(value)) {
+        throwCliError("ERR_INVALID_QUERY", `Invalid docs source: ${value}`);
+      }
+      toolArgs.source = value;
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--remote-endpoint") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      toolArgs.remoteEndpoint = value;
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--remote-timeout-ms") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      toolArgs.remoteTimeoutMs = parseNumberValue(value, token);
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--ref" || token === "--id") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      toolArgs.refId = value;
+      toolArgs.artifactId = value;
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--skill" || token === "--name") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      toolArgs.skillName = value;
+      index = nextIndex;
+      continue;
+    }
+
+    if (token === "--artifact-id") {
+      const [value, nextIndex] = parseRequiredValue(argv, index, token);
+      toolArgs.artifactId = value;
+      index = nextIndex;
+      continue;
+    }
+
+    if (token.startsWith("--")) {
+      throwCliError("ERR_UNKNOWN_OPTION", `Unknown option: ${token}`);
+    }
+
+    positionals.push(token);
+  }
+
+  if (positionals.length > 0) {
+    if (toolName === "search_spacetime_symbols" || toolName === "search_spacetime_docs") {
+      if (!toolArgs.query) {
+        toolArgs.query = positionals.join(" ");
+      } else {
+        throwCliError("ERR_UNEXPECTED_ARGUMENT", `Unexpected extra argument: ${positionals.join(" ")}`);
+      }
+    } else if (toolName === "get_spacetime_schema") {
+      if (!toolArgs.tableName) {
+        toolArgs.tableName = positionals[0];
+      } else {
+        throwCliError("ERR_UNEXPECTED_ARGUMENT", `Unexpected extra argument: ${positionals.join(" ")}`);
+      }
+    } else if (toolName === "get_spacetime_reducers" || toolName === "get_spacetime_client_call") {
+      if (!toolArgs.reducerName) {
+        toolArgs.reducerName = positionals[0];
+      } else {
+        throwCliError("ERR_UNEXPECTED_ARGUMENT", `Unexpected extra argument: ${positionals.join(" ")}`);
+      }
+    } else if (toolName === "read_spacetime_ref") {
+      if (!toolArgs.refId) {
+        toolArgs.refId = positionals[0];
+      } else {
+        throwCliError("ERR_UNEXPECTED_ARGUMENT", `Unexpected extra argument: ${positionals.join(" ")}`);
+      }
+    } else if (toolName === "get_spacetime_skill") {
+      if (!toolArgs.skillName) {
+        toolArgs.skillName = positionals[0];
+      } else {
+        throwCliError("ERR_UNEXPECTED_ARGUMENT", `Unexpected extra argument: ${positionals.join(" ")}`);
+      }
+    } else if (toolName === "read_spacetime_artifact") {
+      if (!toolArgs.artifactId) {
+        toolArgs.artifactId = positionals[0];
+      } else {
+        throwCliError("ERR_UNEXPECTED_ARGUMENT", `Unexpected extra argument: ${positionals.join(" ")}`);
+      }
+    } else {
+      throwCliError("ERR_UNEXPECTED_ARGUMENT", `Unexpected extra argument: ${positionals.join(" ")}`);
+    }
+  }
+
+  return {
+    subject,
+    toolName,
+    workspaceRoot: path.resolve(workspacePath ?? process.cwd()),
+    toolArgs,
+    outputJson
+  };
+}
+
+async function runQueryCommand(parsed: ParsedQueryArgs): Promise<void> {
+  const result = await runSpacetimeToolLocally(parsed.workspaceRoot, parsed.toolName, parsed.toolArgs);
+
+  if (result.isError) {
+    throwCliError("ERR_RUNTIME_FAILURE", String(result.payload), 1);
+  }
+
+  const payload = {
+    ok: true,
+    command: "query",
+    subject: parsed.subject,
+    tool: parsed.toolName,
+    workspaceRoot: parsed.workspaceRoot,
+    result: result.payload
+  };
+
+  if (parsed.outputJson) {
+    console.log(JSON.stringify(payload, null, 2));
+    return;
+  }
+
+  console.log(JSON.stringify(payload, null, 2));
+}
+
 function printResourceResult(
   mode: "install" | "update",
   result: InstallResourcesResult,
@@ -295,6 +797,12 @@ async function main(): Promise<void> {
     if (command === "mcp") {
       const parsed = parseMcpCommandArgs(argv.slice(1));
       await runMcpServer(parsed.workspaceRoot);
+      return;
+    }
+
+    if (command === "query") {
+      const parsed = parseQueryCommandArgs(argv.slice(1));
+      await runQueryCommand(parsed);
       return;
     }
 
