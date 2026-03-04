@@ -86,6 +86,29 @@ test("CLI install supports target and dry-run flags", async () => {
   });
 });
 
+test("CLI install emits machine-readable JSON output", async () => {
+  await withTempWorkspace(async (workspaceRoot) => {
+    const result = await runCli(["install", workspaceRoot, "--target", "codex", "--dry-run", "--json"]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stderr.trim(), "");
+
+    const payload = JSON.parse(result.stdout) as {
+      ok: boolean;
+      command: string;
+      result: {
+        dryRun: boolean;
+        targets: string[];
+      };
+    };
+
+    assert.equal(payload.ok, true);
+    assert.equal(payload.command, "install");
+    assert.equal(payload.result.dryRun, true);
+    assert.deepEqual(payload.result.targets, ["codex"]);
+  });
+});
+
 test("CLI install writes only selected target config files", async () => {
   await withTempWorkspace(async (workspaceRoot) => {
     const result = await runCli(["install", workspaceRoot, "--target", "mcp,opencode"]);
@@ -108,10 +131,31 @@ test("CLI install fails with invalid target values", async () => {
   await withTempWorkspace(async (workspaceRoot) => {
     const result = await runCli(["install", workspaceRoot, "--target", "invalid"]);
 
-    assert.equal(result.exitCode, 1);
-    assert.match(result.stderr, /spacetime-mcp failed: Invalid target\(s\): invalid/);
+    assert.equal(result.exitCode, 2);
+    assert.match(result.stderr, /spacetime-mcp failed \[ERR_INVALID_TARGET\]: Invalid target\(s\): invalid/);
 
     await assert.rejects(readFile(path.join(workspaceRoot, "spacetime-mcp.json"), "utf8"));
+  });
+});
+
+test("CLI install returns JSON error payload when --json is requested", async () => {
+  await withTempWorkspace(async (workspaceRoot) => {
+    const result = await runCli(["install", workspaceRoot, "--target", "invalid", "--json"]);
+
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.stdout.trim(), "");
+
+    const payload = JSON.parse(result.stderr) as {
+      ok: boolean;
+      error: {
+        code: string;
+        message: string;
+      };
+    };
+
+    assert.equal(payload.ok, false);
+    assert.equal(payload.error.code, "ERR_INVALID_TARGET");
+    assert.equal(payload.error.message, "Invalid target(s): invalid");
   });
 });
 

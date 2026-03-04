@@ -5,8 +5,9 @@ import path from "node:path";
 import test from "node:test";
 
 import { installOrUpdateResources } from "../src/cli/resourceInstaller.js";
+import { SPACETIME_MCP_VERSION } from "../src/version.js";
 
-const TEST_VERSION = "0.6.0";
+const TEST_VERSION = SPACETIME_MCP_VERSION;
 
 async function withTempWorkspace(run: (workspaceRoot: string) => Promise<void>): Promise<void> {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "spacetime-mcp-install-test-"));

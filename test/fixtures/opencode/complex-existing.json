@@ -1,0 +1,25 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "theme": "solarized",
+  "mcp": {
+    "workspace-tools": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "node",
+        "scripts/workspace-tools.js"
+      ]
+    },
+    "spacetime-mcp": {
+      "type": "local",
+      "enabled": false,
+      "command": [
+        "node",
+        "legacy/spacetime.js"
+      ]
+    }
+  },
+  "agents": {
+    "default": "builder"
+  }
+}

@@ -1,1 +1,1 @@
-export const SPACETIME_MCP_VERSION = "0.6.0";
+export const SPACETIME_MCP_VERSION = "0.7.0";

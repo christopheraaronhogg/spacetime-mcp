@@ -1,0 +1,13 @@
+model = "gpt-5"
+temperature = 0.2
+
+[mcp_servers.workspace-tools]
+command = "uvx"
+args = ["workspace-tools", "serve"]
+
+[mcp_servers.spacetime-mcp]
+command = "node"
+args = ["legacy/spacetime.js"]
+
+[profiles.default]
+approval_policy = "on-request"

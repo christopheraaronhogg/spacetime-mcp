@@ -6,7 +6,7 @@ It is designed to stop common hallucinations (REST endpoints, SQL migrations, OR
 
 ## Current Status
 
-- Phase: `v0.6.0` cross-client MCP install/update compatibility
+- Phase: `v0.7.0` release-hardening for CLI output, errors, and CI gates
 - Language target for parsing: Rust-first MVP
 - Full product vision and scope live in `docs/PRD.md`
 
@@ -48,6 +48,12 @@ Preview changes without writing files:
 
 ```bash
 npx spacetime-mcp update --dry-run
+```
+
+Emit machine-readable output for automation:
+
+```bash
+npx spacetime-mcp install --target codex --json
 ```
 
 Run against another workspace root:
@@ -113,6 +119,12 @@ Running `spacetime-mcp install` or `spacetime-mcp update` manages these workspac
 
 Managed files include a marker and are safe to refresh with `spacetime-mcp update`.
 JSON and TOML config files are merged non-destructively so existing servers are preserved.
+
+## CLI Output and Errors
+
+- `--json` emits a structured payload for `install` and `update` command results.
+- Error output includes stable error codes for usage failures (example: `ERR_INVALID_TARGET`).
+- Exit codes are `0` for success, `1` for runtime failures, and `2` for usage errors.
 
 ## Project Layout
 
