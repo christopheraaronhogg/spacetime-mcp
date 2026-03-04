@@ -1,4 +1,4 @@
-# SpacetimeMCP v1.0.0 (Draft)
+# SpacetimeMCP v1.0.0
 
 ## Highlights
 
@@ -44,19 +44,17 @@ npx spacetime-mcp install
 
 ## Upgrade Notes
 
-- If you already maintain client MCP configs, `spacetime-mcp` now merges rather than overwrites known config sections.
-- If automation depends on CLI stderr text, prefer `--json` output for stable machine parsing.
+- If you already maintain client MCP configs, `spacetime-mcp` merges known sections instead of overwriting whole files.
+- If automation parses CLI output, prefer `--json` over human-readable stderr strings.
 
-## Verification Checklist
+## Verification
 
-Before finalizing this release:
-
-- Run `npm run check`
-- Run `npm test`
-- Run `npm run build`
-- Run `npm run smoke:package`
-- Complete `docs/RELEASE_CHECKLIST.md`
-- Complete `docs/COMPATIBILITY_PLAYBOOK.md`
+- `npm run check`
+- `npm test`
+- `npm run build`
+- `npm run smoke:package`
+- `docs/RELEASE_CHECKLIST.md`
+- `docs/COMPATIBILITY_PLAYBOOK.md`
 
 ## Acknowledgements
 

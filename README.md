@@ -6,7 +6,7 @@ It is designed to stop common hallucinations (REST endpoints, SQL migrations, OR
 
 ## Current Status
 
-- Phase: `v0.9.0` final release-candidate compatibility and notes prep
+- Phase: `v1.0.0` stable release candidate ready
 - Language target for parsing: Rust-first MVP
 - Full product vision and scope live in `docs/PRD.md`
 
@@ -150,7 +150,8 @@ JSON and TOML config files are merged non-destructively so existing servers are 
 - `docs/PRD.md` - Product requirements document
 - `docs/RELEASE_CHECKLIST.md` - release and 1.0.0 sign-off checklist
 - `docs/COMPATIBILITY_PLAYBOOK.md` - manual compatibility verification steps
-- `docs/RELEASE_NOTES_1.0.0_DRAFT.md` - draft 1.0 release notes
+- `docs/RELEASE_NOTES_1.0.0.md` - 1.0 release notes
+- `docs/RC_VALIDATION_REPORT.md` - recorded release-candidate validation results
 
 ## License
 
