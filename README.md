@@ -104,7 +104,9 @@ spacetime-mcp query symbols player --workspace /path/to/project
 spacetime-mcp query ref tbl_xxxxx --workspace /path/to/project --summary
 ```
 
-`query` subjects map directly to MCP tools (`app`, `schema`, `reducers`, `symbols`, `ref`, `call`, `docs`, `docs-search`, `skills`, `skill`, `artifacts`, `artifact`).
+`query` subjects map directly to MCP tools (`app`, `schema`, `reducers`, `symbols`, `ref`, `call`, `docs`, `docs-search`, `skills`, `skill`, `artifacts`, `artifact`) plus an agent workflow shortcut:
+
+- `scout` (`overview` alias) runs a minimal multi-step context sweep (`app` + `schema` + `reducers`) and returns immediate next-command suggestions.
 
 ## MCP Tool Contract (v1.1)
 

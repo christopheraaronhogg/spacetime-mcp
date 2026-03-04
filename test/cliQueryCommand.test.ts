@@ -193,10 +193,12 @@ test("CLI query resolves ref ids returned from symbol search", async () => {
           matches: Array<{ refId?: string }>;
         };
       };
+      hints: string[];
     };
 
     const refId = searchPayload.result.data.matches.find((match) => Boolean(match.refId))?.refId;
     assert.equal(typeof refId, "string");
+    assert.equal(searchPayload.hints.some((hint) => hint.includes("query ref")), true);
 
     const refResult = await runCli([
       "query",
@@ -223,5 +225,38 @@ test("CLI query resolves ref ids returned from symbol search", async () => {
 
     assert.equal(refPayload.result.data.item.refId, refId);
     assert.ok(["table", "reducer"].includes(refPayload.result.data.kind));
+  });
+});
+
+test("CLI query scout returns combined high-signal overview", async () => {
+  await withSpacetimeWorkspace(async (workspaceRoot) => {
+    const result = await runCli(["query", "scout", "--workspace", workspaceRoot, "--json"]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stderr.trim(), "");
+
+    const payload = JSON.parse(result.stdout) as {
+      ok: boolean;
+      tool: string;
+      result: {
+        mode: string;
+        app: Record<string, unknown>;
+        schema: {
+          preview: Array<Record<string, unknown>>;
+        };
+        reducers: {
+          preview: Array<Record<string, unknown>>;
+        };
+        next: string[];
+      };
+    };
+
+    assert.equal(payload.ok, true);
+    assert.equal(payload.tool, "workflow.scout");
+    assert.equal(payload.result.mode, "scout");
+    assert.equal(payload.result.schema.preview.length > 0, true);
+    assert.equal(payload.result.reducers.preview.length > 0, true);
+    assert.equal(payload.result.next.length >= 2, true);
+    assert.equal(payload.result.next.some((entry) => entry.includes("query symbols")), true);
   });
 });

@@ -80,10 +80,11 @@ function printHelp(): void {
   console.log("");
   console.log("Targets: all, mcp, opencode, codex, antigravity");
   console.log(
-    "Query subjects: app, schema, reducers, ref, symbols, call, docs, docs-search, skills, skill, artifacts, artifact"
+    "Query subjects: app, schema, reducers, ref, symbols, call, docs, docs-search, skills, skill, artifacts, artifact, scout"
   );
   console.log("Query defaults: resolution=minimal, responseMode=inline");
   console.log("Example: spacetime-mcp query schema --contains player --summary --artifact");
+  console.log("Agent shortcut: spacetime-mcp query scout --workspace /path/to/project");
   console.log("Exit codes: 0=success, 1=runtime error, 2=usage error");
 }
 
@@ -208,7 +209,9 @@ const QUERY_SUBJECT_TO_TOOL: Record<string, string> = {
   skills: "list_spacetime_skills",
   skill: "get_spacetime_skill",
   artifacts: "list_spacetime_artifacts",
-  artifact: "read_spacetime_artifact"
+  artifact: "read_spacetime_artifact",
+  scout: "get_spacetime_app_info",
+  overview: "get_spacetime_app_info"
 };
 
 const QUERY_RESOLUTIONS = new Set(["minimal", "summary", "full"]);
@@ -667,20 +670,170 @@ function parseQueryCommandArgs(argv: string[]): ParsedQueryArgs {
   };
 }
 
-async function runQueryCommand(parsed: ParsedQueryArgs): Promise<void> {
-  const result = await runSpacetimeToolLocally(parsed.workspaceRoot, parsed.toolName, parsed.toolArgs);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function unwrapInlineData(payload: unknown): unknown {
+  if (!isRecord(payload)) {
+    return payload;
+  }
+
+  if (payload.responseMode === "inline" && "data" in payload) {
+    return payload.data;
+  }
+
+  return payload;
+}
+
+function toRefId(value: unknown): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const refId = value.refId;
+  return typeof refId === "string" && refId.length > 0 ? refId : undefined;
+}
+
+function buildQueryHints(parsed: ParsedQueryArgs, resultPayload: unknown): string[] {
+  const hints: string[] = [];
+
+  if (isRecord(resultPayload) && resultPayload.responseMode === "artifact") {
+    const artifact = resultPayload.artifact;
+    if (isRecord(artifact) && typeof artifact.id === "string") {
+      hints.push(
+        `spacetime-mcp query artifact ${artifact.id} --workspace ${parsed.workspaceRoot} --json`
+      );
+    }
+  }
+
+  if (parsed.toolName === "search_spacetime_symbols") {
+    const normalized = unwrapInlineData(resultPayload);
+    if (isRecord(normalized) && Array.isArray(normalized.matches)) {
+      const firstRef = normalized.matches.map((entry) => toRefId(entry)).find((entry) => Boolean(entry));
+      if (firstRef) {
+        hints.push(`spacetime-mcp query ref ${firstRef} --workspace ${parsed.workspaceRoot} --summary --json`);
+      }
+    }
+  }
+
+  if (parsed.toolName === "get_spacetime_schema") {
+    hints.push(
+      `spacetime-mcp query schema --workspace ${parsed.workspaceRoot} --summary --limit ${
+        typeof parsed.toolArgs.limit === "number" ? Math.max(10, Math.floor(parsed.toolArgs.limit)) : 20
+      } --json`
+    );
+  }
+
+  return hints.slice(0, 3);
+}
+
+async function runToolOrThrow(
+  workspaceRoot: string,
+  toolName: string,
+  toolArgs?: Record<string, unknown>
+): Promise<unknown> {
+  const result = await runSpacetimeToolLocally(workspaceRoot, toolName, toolArgs);
 
   if (result.isError) {
     throwCliError("ERR_RUNTIME_FAILURE", String(result.payload), 1);
   }
 
+  return result.payload;
+}
+
+function normalizePreviewList(value: unknown, limit: number): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((entry): entry is Record<string, unknown> => isRecord(entry)).slice(0, limit);
+}
+
+async function runScoutWorkflow(parsed: ParsedQueryArgs): Promise<unknown> {
+  const rawLimit = typeof parsed.toolArgs.limit === "number" ? parsed.toolArgs.limit : 8;
+  const previewLimit = Math.max(3, Math.min(Math.floor(rawLimit), 25));
+
+  const baseArgs: Record<string, unknown> = {
+    resolution: "minimal",
+    responseMode: "inline",
+    maxInlineChars: 20000
+  };
+
+  const appPayload = await runToolOrThrow(parsed.workspaceRoot, "get_spacetime_app_info", baseArgs);
+  const schemaPayload = await runToolOrThrow(parsed.workspaceRoot, "get_spacetime_schema", {
+    ...baseArgs,
+    limit: previewLimit
+  });
+  const reducerPayload = await runToolOrThrow(parsed.workspaceRoot, "get_spacetime_reducers", {
+    ...baseArgs,
+    limit: previewLimit
+  });
+
+  const appData = unwrapInlineData(appPayload);
+  const schemaData = unwrapInlineData(schemaPayload);
+  const reducerData = unwrapInlineData(reducerPayload);
+
+  const schemaRecord = isRecord(schemaData) ? schemaData : {};
+  const reducerRecord = isRecord(reducerData) ? reducerData : {};
+
+  const schemaPreview = normalizePreviewList(schemaRecord.tables, previewLimit);
+  const reducerPreview = normalizePreviewList(reducerRecord.reducers, previewLimit);
+
+  const firstTableRef = schemaPreview.map((entry) => toRefId(entry)).find((entry) => Boolean(entry));
+  const firstReducerRef = reducerPreview.map((entry) => toRefId(entry)).find((entry) => Boolean(entry));
+
+  const next: string[] = [];
+  if (firstTableRef) {
+    next.push(`spacetime-mcp query ref ${firstTableRef} --workspace ${parsed.workspaceRoot} --summary --json`);
+  }
+  if (firstReducerRef) {
+    next.push(`spacetime-mcp query ref ${firstReducerRef} --workspace ${parsed.workspaceRoot} --summary --json`);
+  }
+  next.push(`spacetime-mcp query symbols <term> --workspace ${parsed.workspaceRoot} --json`);
+  next.push(`spacetime-mcp query docs-search "<question>" --workspace ${parsed.workspaceRoot} --json`);
+
+  return {
+    mode: "scout",
+    workspaceRoot: parsed.workspaceRoot,
+    app: appData,
+    schema: {
+      previewLimit,
+      matchedTables: isRecord(schemaData) && typeof schemaData.matchedTables === "number"
+        ? schemaData.matchedTables
+        : schemaPreview.length,
+      nextCursor: isRecord(schemaData) ? (schemaData.nextCursor ?? null) : null,
+      preview: schemaPreview
+    },
+    reducers: {
+      previewLimit,
+      matchedReducers: isRecord(reducerData) && typeof reducerData.matchedReducers === "number"
+        ? reducerData.matchedReducers
+        : reducerPreview.length,
+      nextCursor: isRecord(reducerData) ? (reducerData.nextCursor ?? null) : null,
+      preview: reducerPreview
+    },
+    next
+  };
+}
+
+async function runQueryCommand(parsed: ParsedQueryArgs): Promise<void> {
+  const isScoutFlow = parsed.subject === "scout" || parsed.subject === "overview";
+
+  const queryResult = isScoutFlow
+    ? await runScoutWorkflow(parsed)
+    : await runToolOrThrow(parsed.workspaceRoot, parsed.toolName, parsed.toolArgs);
+
+  const hints = isScoutFlow ? [] : buildQueryHints(parsed, queryResult);
+
   const payload = {
     ok: true,
     command: "query",
     subject: parsed.subject,
-    tool: parsed.toolName,
+    tool: isScoutFlow ? "workflow.scout" : parsed.toolName,
     workspaceRoot: parsed.workspaceRoot,
-    result: result.payload
+    result: queryResult,
+    hints
   };
 
   if (parsed.outputJson) {
