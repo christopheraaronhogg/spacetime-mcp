@@ -6,7 +6,7 @@ It is designed to stop common hallucinations (REST endpoints, SQL migrations, OR
 
 ## Current Status
 
-- Phase: `v0.1.0` bootstrap
+- Phase: `v0.2.0` foundation
 - Language target for parsing: Rust-first MVP
 - Full product vision and scope live in `docs/PRD.md`
 
@@ -14,10 +14,9 @@ It is designed to stop common hallucinations (REST endpoints, SQL migrations, OR
 
 - Parse Rust modules for `#[spacetimedb(table)]` structs
 - Parse Rust reducers for `#[spacetimedb(reducer)]` functions
-- Expose MCP tools:
-  - `get_spacetime_schema`
-  - `get_spacetime_reducers`
-  - `get_spacetime_docs`
+- Expose Boost-inspired MCP tools with focused context retrieval
+- Support workspace-level AI guidelines and on-demand skills from `.ai/`
+- Cache workspace context and invalidate cache when Rust files change
 
 ## Local Development
 
@@ -47,14 +46,28 @@ npm test
 
 ## MCP Tool Contract (MVP)
 
+- `get_spacetime_app_info`
+  - Returns language detection, workspace summary, scan metadata, and cache state
 - `get_spacetime_schema`
-  - Optional argument: `tableName`
+  - Optional arguments: `tableName`, `contains`, `limit`, `refresh`
   - Returns parsed tables, columns, and constraints
 - `get_spacetime_reducers`
-  - Optional argument: `reducerName`
+  - Optional arguments: `reducerName`, `contains`, `limit`, `refresh`
   - Returns parsed reducers and argument signatures
+- `search_spacetime_symbols`
+  - Arguments: `query`, optional `kind`, `limit`, `refresh`
+  - Returns ranked table and reducer matches by name/module
+- `get_spacetime_client_call`
+  - Arguments: `reducerName`, optional `client`, `refresh`
+  - Returns TypeScript or Unity/C# reducer invocation guidance
 - `get_spacetime_docs`
-  - Returns grounding rules for SpacetimeDB-first patterns
+  - Optional arguments: `includeWorkspaceGuidelines`, `includeSkills`
+  - Returns built-in grounding rules plus workspace guidelines and skill index
+- `list_spacetime_skills`
+  - Lists skills from `.ai/skills/*/SKILL.md`
+- `get_spacetime_skill`
+  - Argument: `skillName`
+  - Returns the markdown body for a specific skill
 
 ## Project Layout
 
@@ -62,7 +75,11 @@ npm test
 - `src/mcpServer.ts` - MCP tool registration and handlers
 - `src/introspection/rustParser.ts` - Rust syntax extraction helpers
 - `src/introspection/workspaceScanner.ts` - Workspace file discovery and aggregation
+- `src/introspection/workspaceContextStore.ts` - Cached context invalidation by workspace fingerprint
 - `src/context/spacetimeDocs.ts` - Grounding guidance injected to LLMs
+- `src/context/workspaceKnowledge.ts` - Workspace guidelines and skills loader
+- `src/context/clientInvocation.ts` - Reducer invocation mapping for TS/C# clients
+- `src/context/contextQuery.ts` - Symbol search and lookup helpers
 - `docs/PRD.md` - Product requirements document
 
 ## License

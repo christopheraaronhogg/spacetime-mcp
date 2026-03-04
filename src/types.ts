@@ -21,7 +21,54 @@ export interface ReducerSchema {
   arguments: ReducerArgument[];
 }
 
+export type SpacetimeLanguage = "rust";
+
+export interface SpacetimeScanMetadata {
+  detectedLanguages: SpacetimeLanguage[];
+  filesScanned: string[];
+  directoriesScanned: string[];
+  generatedAt: string;
+}
+
 export interface SpacetimeWorkspaceContext {
   tables: TableSchema[];
   reducers: ReducerSchema[];
+  metadata: SpacetimeScanMetadata;
+}
+
+export type SpacetimeSymbolType = "table" | "reducer";
+
+export interface SpacetimeSymbolMatch {
+  kind: SpacetimeSymbolType;
+  name: string;
+  module: string;
+  signature?: string;
+  score: number;
+}
+
+export interface SpacetimeGuideline {
+  id: string;
+  title: string;
+  content: string;
+  source: "builtin" | "workspace";
+  path?: string;
+}
+
+export interface SpacetimeSkill {
+  name: string;
+  description?: string;
+  content: string;
+  path: string;
+}
+
+export type ClientTarget = "typescript" | "csharp" | "unity";
+
+export interface ReducerClientUsage {
+  reducerName: string;
+  module: string;
+  client: ClientTarget;
+  arguments: ReducerArgument[];
+  invocation: string;
+  alternatives: string[];
+  notes: string[];
 }
