@@ -3,18 +3,20 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 
 import { buildReducerClientUsage } from "./context/clientInvocation.js";
 import { findReducerByName, formatReducerSignature, searchSymbols } from "./context/contextQuery.js";
+import { searchSpacetimeDocs } from "./context/docsSearch.js";
 import { getSpacetimeDocsMarkdown } from "./context/spacetimeDocs.js";
 import {
   findWorkspaceSkill,
   listWorkspaceSkills,
   loadWorkspaceGuidelines
 } from "./context/workspaceKnowledge.js";
-import type { ClientTarget, SpacetimeSymbolType } from "./types.js";
+import type { ClientTarget, SpacetimeDocSource, SpacetimeSymbolType } from "./types.js";
 import { WorkspaceContextStore } from "./introspection/workspaceContextStore.js";
 
 type ToolArgs = Record<string, unknown>;
 
 const SUPPORTED_CLIENTS: ClientTarget[] = ["typescript", "csharp", "unity"];
+const SUPPORTED_DOC_SOURCES: Array<SpacetimeDocSource | "all"> = ["all", "builtin", "workspace"];
 const SUPPORTED_SYMBOL_KINDS: Array<SpacetimeSymbolType | "all"> = ["all", "table", "reducer"];
 
 function asOptionalString(value: unknown): string | undefined {
@@ -43,6 +45,12 @@ function asClientTarget(value: unknown): ClientTarget {
   return typeof value === "string" && SUPPORTED_CLIENTS.includes(value as ClientTarget)
     ? (value as ClientTarget)
     : "typescript";
+}
+
+function asDocSource(value: unknown): SpacetimeDocSource | "all" {
+  return typeof value === "string" && SUPPORTED_DOC_SOURCES.includes(value as SpacetimeDocSource)
+    ? (value as SpacetimeDocSource | "all")
+    : "all";
 }
 
 function jsonContent(payload: unknown): { content: [{ type: "text"; text: string }] } {
@@ -88,7 +96,7 @@ export function createSpacetimeMcpServer(workspaceRoot: string): Server {
   const server = new Server(
     {
       name: "spacetime-mcp",
-      version: "0.2.0"
+      version: "0.3.0"
     },
     {
       capabilities: {
@@ -236,6 +244,34 @@ export function createSpacetimeMcpServer(workspaceRoot: string): Server {
                 description: "Include available skill names from .ai/skills."
               }
             },
+            additionalProperties: false
+          }
+        },
+        {
+          name: "search_spacetime_docs",
+          description: "Search built-in and workspace SpacetimeDB docs with ranked excerpts.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              query: {
+                type: "string",
+                description: "Documentation search query."
+              },
+              source: {
+                type: "string",
+                enum: ["all", "builtin", "workspace"],
+                description: "Filter search results by source."
+              },
+              limit: {
+                type: "number",
+                description: "Maximum number of matches to return (1-50)."
+              },
+              includeWorkspaceDocs: {
+                type: "boolean",
+                description: "Include markdown docs from the local workspace in the search index."
+              }
+            },
+            required: ["query"],
             additionalProperties: false
           }
         },
@@ -441,6 +477,33 @@ export function createSpacetimeMcpServer(workspaceRoot: string): Server {
         });
 
         return textContent(markdown);
+      }
+
+      if (name === "search_spacetime_docs") {
+        const query = asOptionalString(args.query);
+        if (!query) {
+          return errorContent("Tool search_spacetime_docs requires a non-empty query argument.");
+        }
+
+        const source = asDocSource(args.source);
+        const includeWorkspaceDocs = asOptionalBoolean(args.includeWorkspaceDocs) ?? true;
+        const limit = asOptionalNumber(args.limit, 1, 50) ?? 8;
+
+        const result = await searchSpacetimeDocs(workspaceRoot, query, {
+          source,
+          includeWorkspaceDocs,
+          limit
+        });
+
+        return jsonContent({
+          workspaceRoot,
+          query,
+          source,
+          includeWorkspaceDocs,
+          documentsIndexed: result.documentsIndexed,
+          hitCount: result.hits.length,
+          hits: result.hits
+        });
       }
 
       if (name === "list_spacetime_skills") {

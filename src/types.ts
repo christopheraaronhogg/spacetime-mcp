@@ -72,3 +72,26 @@ export interface ReducerClientUsage {
   alternatives: string[];
   notes: string[];
 }
+
+export type SpacetimeDocSource = "builtin" | "workspace";
+
+export interface SpacetimeDocEntry {
+  id: string;
+  title: string;
+  content: string;
+  source: SpacetimeDocSource;
+  tags: string[];
+  path?: string;
+  url?: string;
+}
+
+export interface SpacetimeDocSearchHit {
+  id: string;
+  title: string;
+  source: SpacetimeDocSource;
+  score: number;
+  excerpt: string;
+  tags: string[];
+  path?: string;
+  url?: string;
+}

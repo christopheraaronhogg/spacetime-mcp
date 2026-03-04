@@ -6,7 +6,7 @@ It is designed to stop common hallucinations (REST endpoints, SQL migrations, OR
 
 ## Current Status
 
-- Phase: `v0.2.0` foundation
+- Phase: `v0.3.0` docs-search foundation
 - Language target for parsing: Rust-first MVP
 - Full product vision and scope live in `docs/PRD.md`
 
@@ -63,6 +63,9 @@ npm test
 - `get_spacetime_docs`
   - Optional arguments: `includeWorkspaceGuidelines`, `includeSkills`
   - Returns built-in grounding rules plus workspace guidelines and skill index
+- `search_spacetime_docs`
+  - Arguments: `query`, optional `source`, `limit`, `includeWorkspaceDocs`
+  - Returns ranked documentation hits from built-in docs and local markdown resources
 - `list_spacetime_skills`
   - Lists skills from `.ai/skills/*/SKILL.md`
 - `get_spacetime_skill`
@@ -80,6 +83,7 @@ npm test
 - `src/context/workspaceKnowledge.ts` - Workspace guidelines and skills loader
 - `src/context/clientInvocation.ts` - Reducer invocation mapping for TS/C# clients
 - `src/context/contextQuery.ts` - Symbol search and lookup helpers
+- `src/context/docsSearch.ts` - Built-in and workspace documentation search index
 - `docs/PRD.md` - Product requirements document
 
 ## License
