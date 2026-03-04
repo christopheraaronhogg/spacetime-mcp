@@ -39,6 +39,12 @@ npm run build
 npm start
 ```
 
+Run tests:
+
+```bash
+npm test
+```
+
 ## MCP Tool Contract (MVP)
 
 - `get_spacetime_schema`

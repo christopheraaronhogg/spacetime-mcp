@@ -1,8 +1,11 @@
 import type { ReducerArgument, ReducerSchema, TableColumn, TableSchema } from "../types.js";
 
-const TABLE_REGEX = /#\s*\[spacetimedb\(table(?:\([^\)]*\))?\)\]\s*(?:pub\s+)?struct\s+([A-Za-z0-9_]+)\s*\{([\s\S]*?)\n\}/g;
-const FIELD_REGEX = /((?:\s*#\[[^\]]+\]\s*)*)(?:pub\s+)?([A-Za-z0-9_]+)\s*:\s*([^,\n]+),/g;
-const REDUCER_REGEX = /#\s*\[spacetimedb\(reducer(?:\([^\)]*\))?\)\]\s*(?:pub\s+)?fn\s+([A-Za-z0-9_]+)\s*\(([\s\S]*?)\)/g;
+const TABLE_REGEX =
+  /#\s*\[spacetimedb\(table(?:\([^\)]*\))?\)\](?:\s*#\[[^\]]+\])*\s*(?:pub\s+)?struct\s+([A-Za-z0-9_]+)\s*\{([\s\S]*?)\}/g;
+const FIELD_REGEX =
+  /((?:\s*#\[[^\]]+\]\s*)*)(?:pub(?:\([^\)]*\))?\s+)?([A-Za-z0-9_]+)\s*:\s*([^,\n]+),/g;
+const REDUCER_REGEX =
+  /#\s*\[spacetimedb\(reducer(?:\([^\)]*\))?\)\](?:\s*#\[[^\]]+\])*\s*(?:pub\s+)?fn\s+([A-Za-z0-9_]+)\s*\(([\s\S]*?)\)\s*(?:->[\s\S]*?)?\s*\{/g;
 
 function extractConstraints(attributeBlock: string): string[] {
   const constraints: string[] = [];
@@ -74,7 +77,7 @@ function parseReducerArguments(argumentBlock: string): ReducerArgument[] {
         return null;
       }
 
-      const name = arg.slice(0, separatorIndex).trim();
+      const name = arg.slice(0, separatorIndex).trim().replace(/^mut\s+/, "");
       const type = arg.slice(separatorIndex + 1).trim();
 
       if (name.length === 0 || type.length === 0) {
@@ -88,7 +91,7 @@ function parseReducerArguments(argumentBlock: string): ReducerArgument[] {
         return false;
       }
 
-      if (entry.name === "ctx" && entry.type.includes("ReducerContext")) {
+      if (entry.type.includes("ReducerContext")) {
         return false;
       }
 
