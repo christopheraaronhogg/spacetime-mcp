@@ -42,10 +42,11 @@ Use this checklist for every public release, with special attention before `1.0.
 - [ ] Validate docs-search behavior with and without `SPACETIME_MCP_DOCS_API_URL`.
 - [ ] Validate skill and guidelines loading from `.ai/` and `.spacetime/` folders.
 - [ ] Confirm no secrets or local-only files are included in the package.
+- [ ] Execute `docs/COMPATIBILITY_PLAYBOOK.md` and record pass/fail notes.
 
 ## 7) Publish and Tag
 
-- [ ] Create release notes summarizing user-facing changes and migration notes.
+- [ ] Finalize `docs/RELEASE_NOTES_1.0.0_DRAFT.md` into release notes.
 - [ ] Create git tag `vX.Y.Z` on the release commit.
 - [ ] Publish package and verify install from npm in a fresh directory.
 

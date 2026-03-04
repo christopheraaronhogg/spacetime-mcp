@@ -159,6 +159,34 @@ test("CLI install returns JSON error payload when --json is requested", async ()
   });
 });
 
+test("CLI install fails when --target value is missing", async () => {
+  await withTempWorkspace(async (workspaceRoot) => {
+    const result = await runCli(["install", workspaceRoot, "--target"]);
+
+    assert.equal(result.exitCode, 2);
+    assert.match(result.stderr, /spacetime-mcp failed \[ERR_MISSING_OPTION_VALUE\]: --target requires a value/);
+  });
+});
+
+test("CLI default mode rejects unknown options with usage exit code", async () => {
+  const result = await runCli(["--unknown"]);
+
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /spacetime-mcp failed \[ERR_UNKNOWN_OPTION\]: Unknown option: --unknown/);
+});
+
+test("CLI mcp command rejects extra positional arguments", async () => {
+  await withTempWorkspace(async (workspaceRoot) => {
+    const result = await runCli(["mcp", workspaceRoot, "extra"]);
+
+    assert.equal(result.exitCode, 2);
+    assert.match(
+      result.stderr,
+      /spacetime-mcp failed \[ERR_UNEXPECTED_ARGUMENT\]: Unexpected extra argument: extra/
+    );
+  });
+});
+
 test("CLI update reports skipped malformed JSON configs", async () => {
   await withTempWorkspace(async (workspaceRoot) => {
     const malformedPath = path.join(workspaceRoot, ".mcp.json");

@@ -9,14 +9,18 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const npmExecPath = process.env.npm_execpath;
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
-async function runCommand(command, args, cwd) {
+async function runCommand(command, args, cwd, options = {}) {
+  const allowFailure = options.allowFailure ?? false;
+  const shell = options.shell ?? false;
+
   let child;
 
   try {
     child = spawn(command, args, {
       cwd,
       env: process.env,
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"],
+      shell
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -45,7 +49,7 @@ async function runCommand(command, args, cwd) {
     child.once("close", (code) => resolve(code ?? -1));
   });
 
-  if (exitCode !== 0) {
+  if (exitCode !== 0 && !allowFailure) {
     throw new Error(
       [
         `Command failed: ${command} ${args.join(" ")}`,
@@ -59,6 +63,7 @@ async function runCommand(command, args, cwd) {
   }
 
   return {
+    exitCode,
     stdout,
     stderr
   };
@@ -69,7 +74,7 @@ async function runNpmCommand(args, cwd) {
     return runCommand(process.execPath, [npmExecPath, ...args], cwd);
   }
 
-  return runCommand(npmCommand, args, cwd);
+  return runCommand(npmCommand, args, cwd, { shell: process.platform === "win32" });
 }
 
 function parseJsonPayload(rawText) {
@@ -123,6 +128,88 @@ async function main() {
 
     await mkdir(consumerRoot, { recursive: true });
     await mkdir(workspaceRoot, { recursive: true });
+    await mkdir(path.join(workspaceRoot, ".codex"), { recursive: true });
+
+    await writeFile(
+      path.join(workspaceRoot, ".mcp.json"),
+      JSON.stringify(
+        {
+          mcpServers: {
+            custom: {
+              command: "node",
+              args: ["scripts/custom-mcp.js"]
+            },
+            "spacetime-mcp": {
+              command: "node",
+              args: ["legacy/spacetime.js"]
+            }
+          },
+          keepKey: true
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    await writeFile(
+      path.join(workspaceRoot, "opencode.json"),
+      JSON.stringify(
+        {
+          $schema: "https://opencode.ai/config.json",
+          theme: "solarized",
+          mcp: {
+            "workspace-tools": {
+              type: "local",
+              enabled: true,
+              command: ["node", "scripts/workspace-tools.js"]
+            },
+            "spacetime-mcp": {
+              type: "local",
+              enabled: false,
+              command: ["node", "legacy/spacetime.js"]
+            }
+          }
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    await writeFile(
+      path.join(workspaceRoot, "mcp_config.json"),
+      JSON.stringify(
+        {
+          mcpServers: {
+            legacy: {
+              command: "node",
+              args: ["legacy/mcp.js"]
+            }
+          }
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    await writeFile(
+      path.join(workspaceRoot, ".codex", "config.toml"),
+      [
+        "model = \"gpt-5\"",
+        "",
+        "[mcp_servers.workspace-tools]",
+        "command = \"uvx\"",
+        "args = [\"workspace-tools\", \"serve\"]",
+        "",
+        "[mcp_servers.spacetime-mcp]",
+        "command = \"node\"",
+        "args = [\"legacy/spacetime.js\"]",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
 
     await writeFile(
       path.join(consumerRoot, "package.json"),
@@ -142,22 +229,51 @@ async function main() {
 
     const installResult = await runCommand(
       process.execPath,
-      [installedCliPath, "install", workspaceRoot, "--target", "codex", "--json"],
+      [installedCliPath, "install", workspaceRoot, "--json"],
       consumerRoot
     );
 
     const installPayload = parseJsonPayload(installResult.stdout);
     assert.equal(installPayload.ok, true);
     assert.equal(installPayload.command, "install");
-    assert.deepEqual(installPayload.result.targets, ["codex"]);
-    assert.equal(installPayload.result.created.includes(".codex/config.toml"), true);
+    assert.deepEqual(installPayload.result.targets, ["mcp", "opencode", "codex", "antigravity"]);
+
+    const mcpConfig = JSON.parse(await readFile(path.join(workspaceRoot, ".mcp.json"), "utf8"));
+    assert.equal(mcpConfig.keepKey, true);
+    assert.equal(mcpConfig.mcpServers.custom.command, "node");
+    assert.equal(mcpConfig.mcpServers["spacetime-mcp"].command, "npx");
+
+    const opencodeConfig = JSON.parse(await readFile(path.join(workspaceRoot, "opencode.json"), "utf8"));
+    assert.equal(opencodeConfig.theme, "solarized");
+    assert.equal(opencodeConfig.mcp["workspace-tools"].command[0], "node");
+    assert.equal(opencodeConfig.mcp["spacetime-mcp"].enabled, true);
+    assert.deepEqual(opencodeConfig.mcp["spacetime-mcp"].command, ["npx", "-y", "spacetime-mcp", "mcp"]);
+
+    const antigravityConfig = JSON.parse(await readFile(path.join(workspaceRoot, "mcp_config.json"), "utf8"));
+    assert.equal(antigravityConfig.mcpServers.legacy.command, "node");
+    assert.equal(antigravityConfig.mcpServers["spacetime-mcp"].command, "npx");
 
     const codexConfig = await readFile(path.join(workspaceRoot, ".codex", "config.toml"), "utf8");
-    assert.match(codexConfig, /\[mcp_servers\.spacetime-mcp\]/);
+    const codexSectionCount = codexConfig.match(/\[mcp_servers\.spacetime-mcp\]/g)?.length ?? 0;
+    assert.equal(codexSectionCount, 1);
+    assert.equal(codexConfig.includes("legacy/spacetime.js"), false);
+    assert.match(codexConfig, /\[mcp_servers\.workspace-tools\]/);
+    assert.match(codexConfig, /command = "npx"/);
+
+    const summaryConfig = JSON.parse(await readFile(path.join(workspaceRoot, "spacetime-mcp.json"), "utf8"));
+    assert.deepEqual(summaryConfig.targets, ["mcp", "opencode", "codex", "antigravity"]);
 
     const updateResult = await runCommand(
       process.execPath,
-      [installedCliPath, "update", workspaceRoot, "--target", "codex", "--dry-run", "--json"],
+      [
+        installedCliPath,
+        "update",
+        workspaceRoot,
+        "--target",
+        "codex,mcp,opencode,antigravity",
+        "--dry-run",
+        "--json"
+      ],
       consumerRoot
     );
 
@@ -165,6 +281,20 @@ async function main() {
     assert.equal(updatePayload.ok, true);
     assert.equal(updatePayload.command, "update");
     assert.equal(updatePayload.result.dryRun, true);
+
+    const invalidTargetResult = await runCommand(
+      process.execPath,
+      [installedCliPath, "install", workspaceRoot, "--target", "invalid", "--json"],
+      consumerRoot,
+      { allowFailure: true }
+    );
+    assert.equal(invalidTargetResult.exitCode, 2);
+    assert.equal(invalidTargetResult.stdout.trim(), "");
+
+    const invalidPayload = parseJsonPayload(invalidTargetResult.stderr);
+    assert.equal(invalidPayload.ok, false);
+    assert.equal(invalidPayload.error.code, "ERR_INVALID_TARGET");
+    assert.equal(invalidPayload.error.message, "Invalid target(s): invalid");
 
     console.log("Package smoke test passed.");
   } finally {
