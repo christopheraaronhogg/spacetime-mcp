@@ -6,7 +6,7 @@ It is designed to stop common hallucinations (REST endpoints, SQL migrations, OR
 
 ## Current Status
 
-- Phase: `v0.7.0` release-hardening for CLI output, errors, and CI gates
+- Phase: `v0.8.0` release validation and packaging smoke coverage
 - Language target for parsing: Rust-first MVP
 - Full product vision and scope live in `docs/PRD.md`
 
@@ -75,6 +75,12 @@ Run tests:
 npm test
 ```
 
+Run package smoke validation:
+
+```bash
+npm run smoke:package
+```
+
 ## MCP Tool Contract (MVP)
 
 - `get_spacetime_app_info`
@@ -131,6 +137,7 @@ JSON and TOML config files are merged non-destructively so existing servers are 
 - `src/index.ts` - MCP stdio entrypoint
 - `src/cli/resourceInstaller.ts` - install/update generation for MCP resources
 - `src/mcpServer.ts` - MCP tool registration and handlers
+- `src/mcpToolContract.ts` - shared MCP tool contract definitions
 - `src/introspection/rustParser.ts` - Rust syntax extraction helpers
 - `src/introspection/workspaceScanner.ts` - Workspace file discovery and aggregation
 - `src/introspection/workspaceContextStore.ts` - Cached context invalidation by workspace fingerprint
@@ -141,6 +148,7 @@ JSON and TOML config files are merged non-destructively so existing servers are 
 - `src/context/docsSearch.ts` - Built-in and workspace documentation search index
 - `src/version.ts` - shared package and MCP server version constant
 - `docs/PRD.md` - Product requirements document
+- `docs/RELEASE_CHECKLIST.md` - release and 1.0.0 sign-off checklist
 
 ## License
 
