@@ -7,12 +7,15 @@ const EXPECTED_TOOL_NAMES = [
   "get_spacetime_app_info",
   "get_spacetime_schema",
   "get_spacetime_reducers",
+  "read_spacetime_ref",
   "search_spacetime_symbols",
   "get_spacetime_client_call",
   "get_spacetime_docs",
   "search_spacetime_docs",
   "list_spacetime_skills",
-  "get_spacetime_skill"
+  "get_spacetime_skill",
+  "list_spacetime_artifacts",
+  "read_spacetime_artifact"
 ];
 
 function getTool(name: string) {
@@ -41,10 +44,12 @@ test("SPACETIME_MCP_TOOLS has unique names and strict schemas", () => {
 });
 
 test("SPACETIME_MCP_TOOLS keeps required argument contracts for key tools", () => {
+  assert.deepEqual(getTool("read_spacetime_ref").inputSchema.required, ["refId"]);
   assert.deepEqual(getTool("search_spacetime_symbols").inputSchema.required, ["query"]);
   assert.deepEqual(getTool("get_spacetime_client_call").inputSchema.required, ["reducerName"]);
   assert.deepEqual(getTool("search_spacetime_docs").inputSchema.required, ["query"]);
   assert.deepEqual(getTool("get_spacetime_skill").inputSchema.required, ["skillName"]);
+  assert.deepEqual(getTool("read_spacetime_artifact").inputSchema.required, ["artifactId"]);
 });
 
 test("SPACETIME_MCP_TOOLS keeps enum values for filterable fields", () => {
@@ -57,8 +62,16 @@ test("SPACETIME_MCP_TOOLS keeps enum values for filterable fields", () => {
   const docSource = getTool("search_spacetime_docs").inputSchema.properties.source as {
     enum: string[];
   };
+  const resolution = getTool("get_spacetime_schema").inputSchema.properties.resolution as {
+    enum: string[];
+  };
+  const responseMode = getTool("get_spacetime_schema").inputSchema.properties.responseMode as {
+    enum: string[];
+  };
 
   assert.deepEqual(symbolKind.enum, ["all", "table", "reducer"]);
   assert.deepEqual(clientTarget.enum, ["typescript", "csharp", "unity"]);
   assert.deepEqual(docSource.enum, ["all", "builtin", "workspace", "remote"]);
+  assert.deepEqual(resolution.enum, ["minimal", "summary", "full"]);
+  assert.deepEqual(responseMode.enum, ["inline", "artifact"]);
 });

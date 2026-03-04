@@ -81,25 +81,39 @@ Run package smoke validation:
 npm run smoke:package
 ```
 
-## MCP Tool Contract (MVP)
+## MCP Tool Contract (v1.1)
+
+All read-oriented tools support progressive disclosure and context-safe delivery controls:
+
+- `resolution`: `minimal` (default) | `summary` | `full`
+- `responseMode`: `inline` | `artifact`
+- `maxInlineChars`: inline budget before auto-switching to artifact mode
+
+### Core context tools
 
 - `get_spacetime_app_info`
-  - Returns language detection, workspace summary, scan metadata, and cache state
+  - Workspace summary and scan metadata
 - `get_spacetime_schema`
-  - Optional arguments: `tableName`, `contains`, `limit`, `refresh`
-  - Returns parsed tables, columns, and constraints
+  - Optional arguments: `tableName`, `contains`, `limit`, `cursor`, `refresh`
+  - Returns table refs (`tbl_*`) with paginated results
 - `get_spacetime_reducers`
-  - Optional arguments: `reducerName`, `contains`, `limit`, `refresh`
-  - Returns parsed reducers and argument signatures
+  - Optional arguments: `reducerName`, `contains`, `limit`, `cursor`, `refresh`
+  - Returns reducer refs (`red_*`) with paginated results
+- `read_spacetime_ref`
+  - Argument: `refId`
+  - Resolves stable table/reducer references at requested resolution
 - `search_spacetime_symbols`
   - Arguments: `query`, optional `kind`, `limit`, `refresh`
-  - Returns ranked table and reducer matches by name/module
+  - Returns ranked table and reducer matches with stable `refId`
 - `get_spacetime_client_call`
   - Arguments: `reducerName`, optional `client`, `refresh`
   - Returns TypeScript or Unity/C# reducer invocation guidance
+
+### Docs and skills tools
+
 - `get_spacetime_docs`
   - Optional arguments: `includeWorkspaceGuidelines`, `includeSkills`
-  - Returns built-in grounding rules plus workspace guidelines and skill index
+  - Returns grounding docs by requested resolution
 - `search_spacetime_docs`
   - Arguments: `query`, optional `source`, `limit`, `includeWorkspaceDocs`, `includeRemoteDocs`, `remoteEndpoint`, `remoteTimeoutMs`
   - Returns ranked documentation hits from built-in docs, local markdown resources, and optional remote docs APIs
@@ -107,8 +121,17 @@ npm run smoke:package
   - Lists skills from `.ai/skills/*/SKILL.md`
 - `get_spacetime_skill`
   - Argument: `skillName`
-  - Returns the markdown body for a specific skill
+  - Returns skill metadata or full markdown body (resolution-dependent)
 
+### Artifact tools (pointer pattern)
+
+- `list_spacetime_artifacts`
+  - Lists recent artifact handles
+- `read_spacetime_artifact`
+  - Arguments: `artifactId`, optional `offset`, `limit`
+  - Reads disk-backed payloads in chunks
+
+Artifacts are stored in `.spacetime-mcp/artifacts/` and cleaned up automatically with TTL-based retention.
 Remote docs API can be configured globally via `SPACETIME_MCP_DOCS_API_URL`.
 
 ## Generated Resources
@@ -146,6 +169,8 @@ JSON and TOML config files are merged non-destructively so existing servers are 
 - `src/context/clientInvocation.ts` - Reducer invocation mapping for TS/C# clients
 - `src/context/contextQuery.ts` - Symbol search and lookup helpers
 - `src/context/docsSearch.ts` - Built-in and workspace documentation search index
+- `src/context/refIds.ts` - Stable table/reducer reference ID generation and lookup
+- `src/context/artifactStore.ts` - Disk-backed artifact registry and chunked reads
 - `src/version.ts` - shared package and MCP server version constant
 - `docs/PRD.md` - Product requirements document
 - `docs/RELEASE_CHECKLIST.md` - release and 1.0.0 sign-off checklist

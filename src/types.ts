@@ -75,6 +75,19 @@ export interface ReducerClientUsage {
 
 export type SpacetimeDocSource = "builtin" | "workspace" | "remote";
 
+export type SpacetimeDataResolution = "minimal" | "summary" | "full";
+export type SpacetimeResponseMode = "inline" | "artifact";
+
+export interface SpacetimeArtifactRecord {
+  id: string;
+  toolName: string;
+  resolution: SpacetimeDataResolution;
+  createdAt: string;
+  bytes: number;
+  format: "json" | "text";
+  path: string;
+}
+
 export interface SpacetimeDocEntry {
   id: string;
   title: string;
