@@ -1,0 +1,40 @@
+{
+  "name": "spacetime-mcp",
+  "version": "0.1.0",
+  "description": "MCP server that provides SpacetimeDB schema and reducer context to AI assistants.",
+  "type": "module",
+  "bin": {
+    "spacetime-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "spacetimedb",
+    "ai",
+    "cursor",
+    "claude"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
