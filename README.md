@@ -6,7 +6,7 @@ It is designed to stop common hallucinations (REST endpoints, SQL migrations, OR
 
 ## Current Status
 
-- Phase: `v0.3.0` docs-search foundation
+- Phase: `v0.4.0` hybrid docs-search foundation
 - Language target for parsing: Rust-first MVP
 - Full product vision and scope live in `docs/PRD.md`
 
@@ -64,8 +64,10 @@ npm test
   - Optional arguments: `includeWorkspaceGuidelines`, `includeSkills`
   - Returns built-in grounding rules plus workspace guidelines and skill index
 - `search_spacetime_docs`
-  - Arguments: `query`, optional `source`, `limit`, `includeWorkspaceDocs`
-  - Returns ranked documentation hits from built-in docs and local markdown resources
+  - Arguments: `query`, optional `source`, `limit`, `includeWorkspaceDocs`, `includeRemoteDocs`, `remoteEndpoint`, `remoteTimeoutMs`
+  - Returns ranked documentation hits from built-in docs, local markdown resources, and optional remote docs APIs
+
+Remote docs API can be configured globally via `SPACETIME_MCP_DOCS_API_URL`.
 - `list_spacetime_skills`
   - Lists skills from `.ai/skills/*/SKILL.md`
 - `get_spacetime_skill`

@@ -16,7 +16,12 @@ import { WorkspaceContextStore } from "./introspection/workspaceContextStore.js"
 type ToolArgs = Record<string, unknown>;
 
 const SUPPORTED_CLIENTS: ClientTarget[] = ["typescript", "csharp", "unity"];
-const SUPPORTED_DOC_SOURCES: Array<SpacetimeDocSource | "all"> = ["all", "builtin", "workspace"];
+const SUPPORTED_DOC_SOURCES: Array<SpacetimeDocSource | "all"> = [
+  "all",
+  "builtin",
+  "workspace",
+  "remote"
+];
 const SUPPORTED_SYMBOL_KINDS: Array<SpacetimeSymbolType | "all"> = ["all", "table", "reducer"];
 
 function asOptionalString(value: unknown): string | undefined {
@@ -96,7 +101,7 @@ export function createSpacetimeMcpServer(workspaceRoot: string): Server {
   const server = new Server(
     {
       name: "spacetime-mcp",
-      version: "0.3.0"
+      version: "0.4.0"
     },
     {
       capabilities: {
@@ -259,7 +264,7 @@ export function createSpacetimeMcpServer(workspaceRoot: string): Server {
               },
               source: {
                 type: "string",
-                enum: ["all", "builtin", "workspace"],
+                enum: ["all", "builtin", "workspace", "remote"],
                 description: "Filter search results by source."
               },
               limit: {
@@ -269,6 +274,19 @@ export function createSpacetimeMcpServer(workspaceRoot: string): Server {
               includeWorkspaceDocs: {
                 type: "boolean",
                 description: "Include markdown docs from the local workspace in the search index."
+              },
+              includeRemoteDocs: {
+                type: "boolean",
+                description: "Include remote docs API hits in the result set."
+              },
+              remoteEndpoint: {
+                type: "string",
+                description:
+                  "Optional remote docs API endpoint. Defaults to SPACETIME_MCP_DOCS_API_URL env var."
+              },
+              remoteTimeoutMs: {
+                type: "number",
+                description: "Remote docs request timeout in milliseconds (500-10000)."
               }
             },
             required: ["query"],
@@ -487,11 +505,17 @@ export function createSpacetimeMcpServer(workspaceRoot: string): Server {
 
         const source = asDocSource(args.source);
         const includeWorkspaceDocs = asOptionalBoolean(args.includeWorkspaceDocs) ?? true;
+        const includeRemoteDocs = asOptionalBoolean(args.includeRemoteDocs);
+        const remoteEndpoint = asOptionalString(args.remoteEndpoint);
+        const remoteTimeoutMs = asOptionalNumber(args.remoteTimeoutMs, 500, 10000);
         const limit = asOptionalNumber(args.limit, 1, 50) ?? 8;
 
         const result = await searchSpacetimeDocs(workspaceRoot, query, {
           source,
           includeWorkspaceDocs,
+          includeRemoteDocs,
+          remoteEndpoint,
+          remoteTimeoutMs,
           limit
         });
 
@@ -500,8 +524,13 @@ export function createSpacetimeMcpServer(workspaceRoot: string): Server {
           query,
           source,
           includeWorkspaceDocs,
+          includeRemoteDocs: includeRemoteDocs ?? source === "remote",
+          remoteEndpoint: remoteEndpoint ?? process.env.SPACETIME_MCP_DOCS_API_URL,
+          remoteTimeoutMs: remoteTimeoutMs ?? 2500,
           documentsIndexed: result.documentsIndexed,
           hitCount: result.hits.length,
+          warnings: result.warnings,
+          remote: result.remote,
           hits: result.hits
         });
       }

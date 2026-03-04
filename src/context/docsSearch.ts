@@ -88,6 +88,9 @@ const BUILTIN_SPACETIME_DOCS: SpacetimeDocEntry[] = [
   }
 ];
 
+const DEFAULT_REMOTE_TIMEOUT_MS = 2500;
+const DOCS_API_ENV_KEY = "SPACETIME_MCP_DOCS_API_URL";
+
 interface SearchIndexOptions {
   limit?: number;
   source?: "all" | SpacetimeDocSource;
@@ -95,11 +98,162 @@ interface SearchIndexOptions {
 
 export interface SearchSpacetimeDocsOptions extends SearchIndexOptions {
   includeWorkspaceDocs?: boolean;
+  includeRemoteDocs?: boolean;
+  remoteEndpoint?: string;
+  remoteTimeoutMs?: number;
 }
 
 export interface SearchSpacetimeDocsResult {
   documentsIndexed: number;
   hits: SpacetimeDocSearchHit[];
+  warnings: string[];
+  remote: {
+    attempted: boolean;
+    endpoint?: string;
+    hitCount: number;
+    durationMs?: number;
+    error?: string;
+  };
+}
+
+interface RemoteSearchResult {
+  hits: SpacetimeDocSearchHit[];
+  durationMs: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => entry.length > 0);
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function truncate(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength - 3).trim()}...`;
+}
+
+function coerceExcerpt(hit: Record<string, unknown>): string {
+  const fromExcerpt = asString(hit.excerpt);
+  if (fromExcerpt) {
+    return truncate(fromExcerpt.replace(/\s+/g, " "), 240);
+  }
+
+  const fromContent = asString(hit.content);
+  if (fromContent) {
+    return truncate(fromContent.replace(/\s+/g, " "), 240);
+  }
+
+  return "Remote documentation hit.";
+}
+
+function extractRemoteHits(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (!isRecord(payload)) {
+    return [];
+  }
+
+  if (Array.isArray(payload.hits)) {
+    return payload.hits;
+  }
+
+  if (Array.isArray(payload.results)) {
+    return payload.results;
+  }
+
+  if (isRecord(payload.data)) {
+    if (Array.isArray(payload.data.hits)) {
+      return payload.data.hits;
+    }
+
+    if (Array.isArray(payload.data.results)) {
+      return payload.data.results;
+    }
+  }
+
+  return [];
+}
+
+async function fetchRemoteDocs(
+  query: string,
+  endpoint: string,
+  limit: number,
+  timeoutMs: number
+): Promise<RemoteSearchResult> {
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ query, limit }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = (await response.json()) as unknown;
+    const rawHits = extractRemoteHits(payload);
+
+    const hits = rawHits
+      .map((entry, index): SpacetimeDocSearchHit | null => {
+        if (!isRecord(entry)) {
+          return null;
+        }
+
+        const title = asString(entry.title) ?? asString(entry.name) ?? `Remote Doc #${index + 1}`;
+        const url = asString(entry.url);
+        const pathValue = asString(entry.path);
+        const tags = asStringArray(entry.tags);
+        const score = asNumber(entry.score) ?? Math.max(1, 200 - index);
+
+        return {
+          id: asString(entry.id) ?? `remote/${index + 1}`,
+          title,
+          source: "remote",
+          score,
+          excerpt: coerceExcerpt(entry),
+          tags,
+          url,
+          path: pathValue
+        };
+      })
+      .filter((entry): entry is SpacetimeDocSearchHit => Boolean(entry));
+
+    return {
+      hits,
+      durationMs: Date.now() - startedAt
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function normalizePath(workspaceRoot: string, targetPath: string): string {
@@ -367,20 +521,86 @@ export async function searchSpacetimeDocs(
   query: string,
   options?: SearchSpacetimeDocsOptions
 ): Promise<SearchSpacetimeDocsResult> {
+  const source = options?.source ?? "all";
+  const limit = Math.max(1, Math.min(options?.limit ?? 8, 50));
   const includeWorkspaceDocs = options?.includeWorkspaceDocs ?? true;
+  const includeRemoteDocs = options?.includeRemoteDocs ?? source === "remote";
+  const remoteEndpoint = options?.remoteEndpoint ?? process.env[DOCS_API_ENV_KEY];
+  const remoteTimeoutMs = Math.max(500, Math.min(options?.remoteTimeoutMs ?? DEFAULT_REMOTE_TIMEOUT_MS, 10000));
+  const warnings: string[] = [];
 
   const documents: SpacetimeDocEntry[] = [...getBuiltinSpacetimeDocs()];
   if (includeWorkspaceDocs) {
     documents.push(...(await loadWorkspaceDocs(workspaceRoot)));
   }
 
-  const hits = searchDocsIndex(documents, query, {
-    limit: options?.limit,
-    source: options?.source
-  });
+  const localHits =
+    source === "remote"
+      ? []
+      : searchDocsIndex(documents, query, {
+          limit,
+          source
+        });
+
+  let remoteHits: SpacetimeDocSearchHit[] = [];
+  const remote = {
+    attempted: false,
+    endpoint: remoteEndpoint,
+    hitCount: 0,
+    durationMs: undefined as number | undefined,
+    error: undefined as string | undefined
+  };
+
+  if (includeRemoteDocs || source === "remote") {
+    remote.attempted = true;
+
+    if (!remoteEndpoint) {
+      const warning =
+        `Remote docs search requested, but ${DOCS_API_ENV_KEY} is not configured and no remoteEndpoint was provided.`;
+      warnings.push(warning);
+      remote.error = warning;
+    } else {
+      try {
+        const result = await fetchRemoteDocs(query, remoteEndpoint, limit, remoteTimeoutMs);
+        remoteHits = result.hits;
+        remote.hitCount = remoteHits.length;
+        remote.durationMs = result.durationMs;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const warning = `Remote docs search failed: ${message}`;
+        warnings.push(warning);
+        remote.error = warning;
+      }
+    }
+  }
+
+  const hits =
+    source === "remote"
+      ? remoteHits
+      : source === "all"
+        ? [...localHits, ...remoteHits]
+            .sort((left, right) => {
+              if (right.score !== left.score) {
+                return right.score - left.score;
+              }
+
+              return left.title.localeCompare(right.title);
+            })
+            .slice(0, limit)
+        : localHits;
+
+  if (source === "remote" && remote.attempted && remoteHits.length === 0 && !remote.error) {
+    warnings.push("Remote docs search returned no results.");
+  }
+
+  if (source !== "remote" && includeRemoteDocs && remote.attempted && remoteHits.length === 0 && !remote.error) {
+    warnings.push("Remote docs search returned no matches; using local documentation index only.");
+  }
 
   return {
     documentsIndexed: documents.length,
-    hits
+    hits,
+    warnings,
+    remote
   };
 }

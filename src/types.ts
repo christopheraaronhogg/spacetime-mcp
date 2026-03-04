@@ -73,7 +73,7 @@ export interface ReducerClientUsage {
   notes: string[];
 }
 
-export type SpacetimeDocSource = "builtin" | "workspace";
+export type SpacetimeDocSource = "builtin" | "workspace" | "remote";
 
 export interface SpacetimeDocEntry {
   id: string;
