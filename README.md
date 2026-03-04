@@ -6,7 +6,7 @@ It is designed to stop common hallucinations (REST endpoints, SQL migrations, OR
 
 ## Current Status
 
-- Phase: `v0.4.0` hybrid docs-search foundation
+- Phase: `v0.5.0` install/update workflow foundation
 - Language target for parsing: Rust-first MVP
 - Full product vision and scope live in `docs/PRD.md`
 
@@ -23,6 +23,18 @@ It is designed to stop common hallucinations (REST endpoints, SQL migrations, OR
 ```bash
 npm install
 npm run dev
+```
+
+Install MCP resources into a workspace:
+
+```bash
+npx spacetime-mcp install
+```
+
+Update managed MCP resources:
+
+```bash
+npx spacetime-mcp update
 ```
 
 Run against another workspace root:
@@ -66,17 +78,30 @@ npm test
 - `search_spacetime_docs`
   - Arguments: `query`, optional `source`, `limit`, `includeWorkspaceDocs`, `includeRemoteDocs`, `remoteEndpoint`, `remoteTimeoutMs`
   - Returns ranked documentation hits from built-in docs, local markdown resources, and optional remote docs APIs
-
-Remote docs API can be configured globally via `SPACETIME_MCP_DOCS_API_URL`.
 - `list_spacetime_skills`
   - Lists skills from `.ai/skills/*/SKILL.md`
 - `get_spacetime_skill`
   - Argument: `skillName`
   - Returns the markdown body for a specific skill
 
+Remote docs API can be configured globally via `SPACETIME_MCP_DOCS_API_URL`.
+
+## Generated Resources
+
+Running `spacetime-mcp install` or `spacetime-mcp update` manages these workspace files:
+
+- `.mcp.json` - MCP server registration for local tools
+- `spacetime-mcp.json` - package-level managed config metadata
+- `.ai/guidelines/spacetimedb/core.md` - built-in SpacetimeDB grounding guidelines
+- `.ai/skills/spacetimedb-development/SKILL.md` - on-demand skill for feature work
+
+Managed files include a marker and are safe to refresh with `spacetime-mcp update`.
+Unmanaged files are preserved and reported as skipped.
+
 ## Project Layout
 
 - `src/index.ts` - MCP stdio entrypoint
+- `src/cli/resourceInstaller.ts` - install/update generation for MCP resources
 - `src/mcpServer.ts` - MCP tool registration and handlers
 - `src/introspection/rustParser.ts` - Rust syntax extraction helpers
 - `src/introspection/workspaceScanner.ts` - Workspace file discovery and aggregation
@@ -86,6 +111,7 @@ Remote docs API can be configured globally via `SPACETIME_MCP_DOCS_API_URL`.
 - `src/context/clientInvocation.ts` - Reducer invocation mapping for TS/C# clients
 - `src/context/contextQuery.ts` - Symbol search and lookup helpers
 - `src/context/docsSearch.ts` - Built-in and workspace documentation search index
+- `src/version.ts` - shared package and MCP server version constant
 - `docs/PRD.md` - Product requirements document
 
 ## License

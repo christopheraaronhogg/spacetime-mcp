@@ -12,6 +12,7 @@ import {
 } from "./context/workspaceKnowledge.js";
 import type { ClientTarget, SpacetimeDocSource, SpacetimeSymbolType } from "./types.js";
 import { WorkspaceContextStore } from "./introspection/workspaceContextStore.js";
+import { SPACETIME_MCP_VERSION } from "./version.js";
 
 type ToolArgs = Record<string, unknown>;
 
@@ -101,7 +102,7 @@ export function createSpacetimeMcpServer(workspaceRoot: string): Server {
   const server = new Server(
     {
       name: "spacetime-mcp",
-      version: "0.4.0"
+      version: SPACETIME_MCP_VERSION
     },
     {
       capabilities: {

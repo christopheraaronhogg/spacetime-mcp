@@ -1,6 +1,6 @@
 {
   "name": "spacetime-mcp",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "MCP server that provides SpacetimeDB schema and reducer context to AI assistants.",
   "type": "module",
   "bin": {
